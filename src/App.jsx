@@ -1090,10 +1090,22 @@ export default function App() {
     const fmtDT = m =>
       `${dateStr}T${String(Math.floor(m/60)).padStart(2,'0')}${String(m%60).padStart(2,'0')}00`;
 
+    const LUNCH_START = 12 * 60; // 720
+    const LUNCH_END   = 13 * 60; // 780
+
     const items = allItems.map(item => {
+      // 昼休憩中に開始する場合は 13:00 に押し出す
+      if(startMins >= LUNCH_START && startMins < LUNCH_END) startMins = LUNCH_END;
+
       const duration = item.estimatedMinutes > 0 ? item.estimatedMinutes : 60;
-      const endMins  = startMins + duration;
-      const result   = {
+      let endMins = startMins + duration;
+
+      // タスクが昼休憩をまたぐ場合、終了時刻を 60 分押し出す
+      if(startMins < LUNCH_START && endMins > LUNCH_START) {
+        endMins += (LUNCH_END - LUNCH_START);
+      }
+
+      const result = {
         title: item.title, startMins, endMins,
         url: `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(item.title)}&dates=${fmtDT(startMins)}/${fmtDT(endMins)}`,
       };
