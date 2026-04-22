@@ -270,17 +270,27 @@ function calcSchedule(rawItems) {
 }
 
 function ScheduleModal({ rawItems, onClose }) {
-  const [order, setOrder] = useState(rawItems);
+  const [order, setOrder]       = useState(rawItems);
+  const [dragOverIdx, setDragOverIdx] = useState(null);
+  const dragIdx = useRef(null);
   const fmtTime = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
   const computed = useMemo(() => calcSchedule(order), [order]);
 
-  const move = (i, dir) => setOrder(prev => {
-    const arr  = [...prev];
-    const swap = i + dir;
-    if(swap < 0 || swap >= arr.length) return prev;
-    [arr[i], arr[swap]] = [arr[swap], arr[i]];
-    return arr;
-  });
+  const handleDrop = (targetIdx) => {
+    if(dragIdx.current === null || dragIdx.current === targetIdx) {
+      dragIdx.current = null;
+      setDragOverIdx(null);
+      return;
+    }
+    setOrder(prev => {
+      const arr = [...prev];
+      const [item] = arr.splice(dragIdx.current, 1);
+      arr.splice(targetIdx, 0, item);
+      return arr;
+    });
+    dragIdx.current = null;
+    setDragOverIdx(null);
+  };
 
   return (
     <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
@@ -298,22 +308,24 @@ function ScheduleModal({ rawItems, onClose }) {
             style={{background:'none',border:'none',fontSize:'17px',cursor:'pointer',color:'#9095a0'}}>✕</button>
         </div>
         <div style={{fontSize:'11px',color:'#9095a0',marginBottom:'16px'}}>
-          ▲▼ で順番を変更できます　※ 12:00〜13:00 は昼休憩
+          ドラッグで順番を変更できます　※ 12:00〜13:00 は昼休憩
         </div>
         <div style={{overflowY:'auto',flex:1,marginBottom:'16px'}}>
           {computed.map((item,i)=>(
-            <div key={i} style={{display:'flex',alignItems:'center',gap:'8px',
-              padding:'10px 12px',borderRadius:'8px',marginBottom:'6px',
-              background:'#ffffff',border:'1px solid #e8eaed'}}>
-              {/* 並び替えボタン */}
-              <div style={{display:'flex',flexDirection:'column',gap:'2px',flexShrink:0}}>
-                <button onClick={()=>move(i,-1)} disabled={i===0}
-                  style={{background:'none',border:'none',cursor:i===0?'default':'pointer',
-                    fontSize:'11px',color:i===0?'#d0d3db':'#5f6470',lineHeight:1,padding:'1px 4px'}}>▲</button>
-                <button onClick={()=>move(i,1)} disabled={i===computed.length-1}
-                  style={{background:'none',border:'none',cursor:i===computed.length-1?'default':'pointer',
-                    fontSize:'11px',color:i===computed.length-1?'#d0d3db':'#5f6470',lineHeight:1,padding:'1px 4px'}}>▼</button>
-              </div>
+            <div key={i}
+              draggable
+              onDragStart={()=>{ dragIdx.current=i; }}
+              onDragOver={e=>{ e.preventDefault(); setDragOverIdx(i); }}
+              onDragLeave={()=>setDragOverIdx(null)}
+              onDrop={()=>handleDrop(i)}
+              onDragEnd={()=>{ dragIdx.current=null; setDragOverIdx(null); }}
+              style={{display:'flex',alignItems:'center',gap:'8px',
+                padding:'10px 12px',borderRadius:'8px',marginBottom:'6px',cursor:'grab',
+                background: dragOverIdx===i ? '#f0f4ff' : '#ffffff',
+                border: `1px solid ${dragOverIdx===i ? '#378ADD' : '#e8eaed'}`,
+                transition:'background 0.1s, border 0.1s'}}>
+              {/* ハンドル */}
+              <span style={{fontSize:'13px',color:'#c0c4cc',flexShrink:0,userSelect:'none'}}>⠿</span>
               {/* 時刻 */}
               <div style={{fontSize:'12px',color:'#BA7517',fontWeight:'600',flexShrink:0,minWidth:'116px'}}>
                 {fmtTime(item.startMins)} 〜 {fmtTime(item.endMins)}
@@ -325,6 +337,7 @@ function ScheduleModal({ rawItems, onClose }) {
               </div>
               {/* 追加ボタン */}
               <a href={item.url} target="_blank" rel="noreferrer"
+                onClick={e=>e.stopPropagation()}
                 style={{...btnSt('#e8f0fe','#2c5fcc'),fontSize:'12px',padding:'5px 14px',
                   textDecoration:'none',flexShrink:0}}>
                 追加
