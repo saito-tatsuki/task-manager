@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 
 // ── UTILS ──────────────────────────────────────────────────
 function getWeekDates(offset = 0) {
@@ -247,36 +247,83 @@ function EstimatedTimeModal({ taskTitle, onConfirm, onCancel }) {
 }
 
 // ── SCHEDULE MODAL ──────────────────────────────────────────
-function ScheduleModal({ items, onClose }) {
+const LUNCH_START = 12 * 60; // 720
+const LUNCH_END   = 13 * 60; // 780
+
+function calcSchedule(rawItems) {
+  const today   = new Date();
+  const dateStr = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
+  const fmtDT   = m => `${dateStr}T${String(Math.floor(m/60)).padStart(2,'0')}${String(m%60).padStart(2,'0')}00`;
+  let startMins = 10 * 60;
+  return rawItems.map(item => {
+    if(startMins >= LUNCH_START && startMins < LUNCH_END) startMins = LUNCH_END;
+    const duration = item.estimatedMinutes > 0 ? item.estimatedMinutes : 60;
+    let endMins = startMins + duration;
+    if(startMins < LUNCH_START && endMins > LUNCH_START) endMins += (LUNCH_END - LUNCH_START);
+    const result = {
+      ...item, startMins, endMins,
+      url: `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(item.title)}&dates=${fmtDT(startMins)}/${fmtDT(endMins)}`,
+    };
+    startMins = endMins;
+    return result;
+  });
+}
+
+function ScheduleModal({ rawItems, onClose }) {
+  const [order, setOrder] = useState(rawItems);
   const fmtTime = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+  const computed = useMemo(() => calcSchedule(order), [order]);
+
+  const move = (i, dir) => setOrder(prev => {
+    const arr  = [...prev];
+    const swap = i + dir;
+    if(swap < 0 || swap >= arr.length) return prev;
+    [arr[i], arr[swap]] = [arr[swap], arr[i]];
+    return arr;
+  });
+
   return (
     <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
       style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:250,
         display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}>
       <div onClick={e=>e.stopPropagation()}
         style={{background:'#ffffff',borderRadius:'12px',border:'1px solid #e8eaed',
-          width:'100%',maxWidth:'540px',padding:'28px',
+          width:'100%',maxWidth:'560px',padding:'28px',
           boxShadow:'0 8px 32px rgba(0,0,0,0.12)',maxHeight:'80vh',display:'flex',flexDirection:'column'}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'18px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'6px'}}>
           <h2 style={{fontSize:'15px',fontWeight:'600',color:'#1a1d23'}}>
             📅 本日のスケジュール（10:00 始業）
           </h2>
           <button onClick={onClose}
             style={{background:'none',border:'none',fontSize:'17px',cursor:'pointer',color:'#9095a0'}}>✕</button>
         </div>
+        <div style={{fontSize:'11px',color:'#9095a0',marginBottom:'16px'}}>
+          ▲▼ で順番を変更できます　※ 12:00〜13:00 は昼休憩
+        </div>
         <div style={{overflowY:'auto',flex:1,marginBottom:'16px'}}>
-          {items.map((item,i)=>(
-            <div key={i} style={{display:'flex',alignItems:'center',gap:'10px',
+          {computed.map((item,i)=>(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:'8px',
               padding:'10px 12px',borderRadius:'8px',marginBottom:'6px',
-              background:i%2===0?'#f9fafb':'#ffffff',border:'1px solid #e8eaed'}}>
-              <div style={{fontSize:'12px',color:'#BA7517',fontWeight:'600',
-                flexShrink:0,minWidth:'116px'}}>
+              background:'#ffffff',border:'1px solid #e8eaed'}}>
+              {/* 並び替えボタン */}
+              <div style={{display:'flex',flexDirection:'column',gap:'2px',flexShrink:0}}>
+                <button onClick={()=>move(i,-1)} disabled={i===0}
+                  style={{background:'none',border:'none',cursor:i===0?'default':'pointer',
+                    fontSize:'11px',color:i===0?'#d0d3db':'#5f6470',lineHeight:1,padding:'1px 4px'}}>▲</button>
+                <button onClick={()=>move(i,1)} disabled={i===computed.length-1}
+                  style={{background:'none',border:'none',cursor:i===computed.length-1?'default':'pointer',
+                    fontSize:'11px',color:i===computed.length-1?'#d0d3db':'#5f6470',lineHeight:1,padding:'1px 4px'}}>▼</button>
+              </div>
+              {/* 時刻 */}
+              <div style={{fontSize:'12px',color:'#BA7517',fontWeight:'600',flexShrink:0,minWidth:'116px'}}>
                 {fmtTime(item.startMins)} 〜 {fmtTime(item.endMins)}
               </div>
+              {/* タイトル */}
               <div style={{flex:1,fontSize:'13px',color:'#1a1d23',
                 overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
                 {item.title}
               </div>
+              {/* 追加ボタン */}
               <a href={item.url} target="_blank" rel="noreferrer"
                 style={{...btnSt('#e8f0fe','#2c5fcc'),fontSize:'12px',padding:'5px 14px',
                   textDecoration:'none',flexShrink:0}}>
@@ -1070,12 +1117,8 @@ export default function App() {
 
   const stats = ALL_COLS.map(c=>({...c, count:wsTasks.filter(t=>t.status===c.key).length}));
 
-  // ── スケジュールモーダルを開く（In Progress タスクを 10:00 始業で一覧表示）──
+  // ── スケジュールモーダルを開く ──────────────────────────────
   const openScheduleModal = (ipTasks) => {
-    const today = new Date();
-    const dateStr = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
-    let startMins = 10 * 60; // 10:00
-
     const ipSubtasks = wsTasks.flatMap(t =>
       t.subtasks
         .filter(s => s.status === 'inprogress')
@@ -1086,33 +1129,7 @@ export default function App() {
       ...ipSubtasks,
     ];
     if(allItems.length === 0) return;
-
-    const fmtDT = m =>
-      `${dateStr}T${String(Math.floor(m/60)).padStart(2,'0')}${String(m%60).padStart(2,'0')}00`;
-
-    const LUNCH_START = 12 * 60; // 720
-    const LUNCH_END   = 13 * 60; // 780
-
-    const items = allItems.map(item => {
-      // 昼休憩中に開始する場合は 13:00 に押し出す
-      if(startMins >= LUNCH_START && startMins < LUNCH_END) startMins = LUNCH_END;
-
-      const duration = item.estimatedMinutes > 0 ? item.estimatedMinutes : 60;
-      let endMins = startMins + duration;
-
-      // タスクが昼休憩をまたぐ場合、終了時刻を 60 分押し出す
-      if(startMins < LUNCH_START && endMins > LUNCH_START) {
-        endMins += (LUNCH_END - LUNCH_START);
-      }
-
-      const result = {
-        title: item.title, startMins, endMins,
-        url: `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(item.title)}&dates=${fmtDT(startMins)}/${fmtDT(endMins)}`,
-      };
-      startMins = endMins;
-      return result;
-    });
-    setScheduleItems(items);
+    setScheduleItems(allItems);
   };
 
   return (
@@ -1501,7 +1518,7 @@ export default function App() {
           onClose={()=>setShowWsMgr(false)}/>
       )}
       {scheduleItems&&(
-        <ScheduleModal items={scheduleItems} onClose={()=>setScheduleItems(null)}/>
+        <ScheduleModal rawItems={scheduleItems} onClose={()=>setScheduleItems(null)}/>
       )}
       {pendingIP&&(
         <EstimatedTimeModal
