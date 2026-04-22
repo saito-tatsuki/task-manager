@@ -107,16 +107,6 @@ function TaskCard({ task, accent, pjJobs, onClick, onDragStart, onDragEnd, expan
           期限 {task.due}
         </div>
       )}
-      {task.startedAt ? (
-        <div onClick={onClick} style={{fontSize:'11px',color:'#854F0B',marginTop:'4px',fontWeight:'600'}}>
-          🕐 {fmtTs(task.startedAt)}{task.estimatedMinutes>0?` 〜 ${fmtTs(task.startedAt+task.estimatedMinutes*60000)}`:''}
-        </div>
-      ) : task.estimatedMinutes > 0 ? (
-        <div onClick={onClick} style={{fontSize:'11px',color:'#BA7517',marginTop:'4px'}}>
-          ⏱ {Math.floor(task.estimatedMinutes/60)>0?`${Math.floor(task.estimatedMinutes/60)}時間`:''}
-          {task.estimatedMinutes%60>0?`${task.estimatedMinutes%60}分`:''}
-        </div>
-      ) : null}
       {hasSubtasks && onToggleExpand && (
         <div onClick={handleToggle}
           style={{marginTop:'8px',padding:'6px 8px',borderRadius:'6px',cursor:'pointer',
@@ -191,16 +181,6 @@ function SubtaskInProgressCard({ subtask, parentTask, onDragStart, onDragEnd, on
             {parentTask.title}
           </span>
         </div>
-        {subtask.startedAt ? (
-          <span style={{fontSize:'11px', color:'#854F0B', flexShrink:0, fontWeight:'600'}}>
-            🕐 {fmtTs(subtask.startedAt)}{subtask.estimatedMinutes>0?` 〜 ${fmtTs(subtask.startedAt+subtask.estimatedMinutes*60000)}`:''}
-          </span>
-        ) : subtask.estimatedMinutes > 0 ? (
-          <span style={{fontSize:'11px', color:'#BA7517', flexShrink:0}}>
-            ⏱ {Math.floor(subtask.estimatedMinutes/60)>0?`${Math.floor(subtask.estimatedMinutes/60)}時間`:''}
-            {subtask.estimatedMinutes%60>0?`${subtask.estimatedMinutes%60}分`:''}
-          </span>
-        ) : null}
         {onComplete && hov && (
           <button onClick={e=>{e.stopPropagation();onComplete();}}
             style={{...btnSt('#EAF3DE','#3B6D11'),fontSize:'11px',padding:'3px 10px',flexShrink:0}}>
@@ -426,11 +406,11 @@ function CompleteTaskModal({ taskTitle, startedAt, onConfirm, onCancel }) {
 const LUNCH_START = 12 * 60; // 720
 const LUNCH_END   = 13 * 60; // 780
 
-function calcSchedule(rawItems) {
+function calcSchedule(rawItems, overrideStartMins) {
   const today   = new Date();
   const dateStr = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
   const fmtDT   = m => `${dateStr}T${String(Math.floor(m/60)).padStart(2,'0')}${String(m%60).padStart(2,'0')}00`;
-  let startMins = 10 * 60;
+  let startMins = overrideStartMins ?? 10 * 60;
   return rawItems.map(item => {
     if(startMins >= LUNCH_START && startMins < LUNCH_END) startMins = LUNCH_END;
     const duration = item.estimatedMinutes > 0 ? item.estimatedMinutes : 60;
@@ -445,12 +425,12 @@ function calcSchedule(rawItems) {
   });
 }
 
-function ScheduleModal({ rawItems, onClose, onApply, onComplete }) {
+function ScheduleModal({ rawItems, overrideStartMins, onClose, onApply, onComplete }) {
   const [order, setOrder]       = useState(rawItems);
   const [dragOverIdx, setDragOverIdx] = useState(null);
   const dragIdx = useRef(null);
   const fmtTime = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
-  const computed = useMemo(() => calcSchedule(order), [order]);
+  const computed = useMemo(() => calcSchedule(order, overrideStartMins), [order, overrideStartMins]);
 
   const handleClose = () => { onApply?.(computed); onClose(); };
 
@@ -1377,14 +1357,23 @@ export default function App() {
     const ipSubtasks = wsTasks.flatMap(t =>
       t.subtasks
         .filter(s => s.status === 'inprogress')
-        .map(s => ({taskId:t.id, subId:s.id, title:`${t.title}：${s.text}`, estimatedMinutes: s.estimatedMinutes || 0, startedAt: s.startedAt, wsId: t.wsId}))
+        .map(s => ({taskId:t.id, subId:s.id, title:`${t.title}：${s.text}`, estimatedMinutes: s.estimatedMinutes || 0, startedAt: s.startedAt, scheduledStart: s.scheduledStart, wsId: t.wsId}))
     );
     const allItems = [
-      ...ipTasks.map(t => ({taskId:t.id, title: t.title, estimatedMinutes: t.estimatedMinutes || 0, startedAt: t.startedAt, wsId: t.wsId})),
+      ...ipTasks.map(t => ({taskId:t.id, title: t.title, estimatedMinutes: t.estimatedMinutes || 0, startedAt: t.startedAt, scheduledStart: t.scheduledStart, wsId: t.wsId})),
       ...ipSubtasks,
     ];
     if(allItems.length === 0) return;
-    setScheduleItems(allItems);
+
+    // scheduledStart（applySchedule/カスケードで設定）がある場合のみ開始時刻を算出
+    const today0 = new Date(); today0.setHours(0,0,0,0);
+    const todayMs = today0.getTime();
+    const minsMins = allItems
+      .filter(i => i.scheduledStart && i.scheduledStart >= todayMs + 10 * 60 * 60000)
+      .map(i => Math.round((i.scheduledStart - todayMs) / 60000));
+    const startMins = minsMins.length > 0 ? Math.min(...minsMins) : undefined;
+
+    setScheduleItems({items: allItems, startMins});
   };
 
   const applySchedule = (computedItems) => {
@@ -1397,10 +1386,10 @@ export default function App() {
         if (item.subId) {
           updated = updated.map(t => {
             if (t.id !== item.taskId) return t;
-            return {...t, subtasks: t.subtasks.map(s => s.id === item.subId ? {...s, startedAt: startTs} : s)};
+            return {...t, subtasks: t.subtasks.map(s => s.id === item.subId ? {...s, startedAt: startTs, scheduledStart: startTs} : s)};
           });
         } else if (item.taskId) {
-          updated = updated.map(t => t.id === item.taskId ? {...t, startedAt: startTs} : t);
+          updated = updated.map(t => t.id === item.taskId ? {...t, startedAt: startTs, scheduledStart: startTs} : t);
         }
       });
       return updated;
@@ -1796,7 +1785,7 @@ export default function App() {
           onClose={()=>setShowWsMgr(false)}/>
       )}
       {scheduleItems&&(
-        <ScheduleModal rawItems={scheduleItems} onClose={()=>setScheduleItems(null)} onApply={applySchedule}
+        <ScheduleModal rawItems={scheduleItems.items} overrideStartMins={scheduleItems.startMins} onClose={()=>setScheduleItems(null)} onApply={applySchedule}
           onComplete={(item, computed)=>{
             applySchedule(computed);
             setScheduleItems(null);
@@ -1809,6 +1798,7 @@ export default function App() {
               title: item.title,
               startedAt: scheduledStartTs,
               wsId: item.wsId,
+              scheduleComputed: computed,
             });
           }}/>
       )}
@@ -1844,16 +1834,29 @@ export default function App() {
               updateTask(pendingComplete.taskId, {status:'done', actualMinutes:mins, completedAt:Date.now()});
 
               // 以降のスケジュール済みタスクを一括シフト
-              if(endTs && pendingComplete.startedAt){
-                const subsequent = tasks
-                  .filter(t=>t.wsId===pendingComplete.wsId && t.status!=='done' && t.id!==pendingComplete.taskId && t.startedAt)
-                  .filter(t=>t.startedAt > pendingComplete.startedAt)
-                  .sort((a,b)=>a.startedAt - b.startedAt);
+              if(endTs && pendingComplete.scheduleComputed){
+                const { taskId, scheduleComputed } = pendingComplete;
+                const completedIdx = scheduleComputed.findIndex(i=>i.taskId===taskId && !i.subId);
+                const subsequent = completedIdx >= 0 ? scheduleComputed.slice(completedIdx + 1) : [];
                 if(subsequent.length > 0){
-                  const delta = endTs - subsequent[0].startedAt;
+                  const today = new Date(); today.setHours(0,0,0,0);
+                  const firstTs = today.getTime() + subsequent[0].startMins * 60000;
+                  const delta = endTs - firstTs;
                   if(delta !== 0){
-                    const shiftIds = new Set(subsequent.map(t=>t.id));
-                    setTasks(ts=>ts.map(t=>shiftIds.has(t.id) ? {...t, startedAt: t.startedAt + delta} : t));
+                    setTasks(ts=>{
+                      let updated = ts;
+                      subsequent.forEach(item=>{
+                        const newTs = today.getTime() + item.startMins * 60000 + delta;
+                        if(item.subId){
+                          updated = updated.map(t=>t.id===item.taskId
+                            ? {...t, subtasks:t.subtasks.map(s=>s.id===item.subId?{...s,startedAt:newTs,scheduledStart:newTs}:s)}
+                            : t);
+                        } else if(item.taskId){
+                          updated = updated.map(t=>t.id===item.taskId?{...t,startedAt:newTs,scheduledStart:newTs}:t);
+                        }
+                      });
+                      return updated;
+                    });
                   }
                 }
               }
