@@ -88,19 +88,10 @@ function TaskCard({ task, accent, pjJobs, onClick, onDragStart, onDragEnd, expan
         cursor:'pointer', transform:hov?'translateY(-1px)':'none', transition:'all 0.12s',
         boxShadow:hov?'0 2px 8px rgba(0,0,0,0.08)':'none' }}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'6px'}}>
-        <div style={{display:'flex',alignItems:'flex-start',gap:'6px',flex:1,minWidth:0}}
-          onClick={onClick}>
-          {hasSubtasks && onToggleExpand && (
-            <button onClick={handleToggle}
-              style={{background:'none',border:'none',cursor:'pointer',padding:'0',
-                fontSize:'9px',color:'#9095a0',marginTop:'2px',flexShrink:0,lineHeight:1}}>
-              {expanded ? '▼' : '▶'}
-            </button>
-          )}
-          <span style={{fontWeight:'500',fontSize:'13px',color:'#1a1d23',lineHeight:'1.45'}}>
-            {task.title}
-          </span>
-        </div>
+        <span onClick={onClick}
+          style={{fontWeight:'500',fontSize:'13px',color:'#1a1d23',lineHeight:'1.45',flex:1,minWidth:0}}>
+          {task.title}
+        </span>
         <span onClick={onClick} style={{fontSize:'11px',fontWeight:'600',color:p.color,marginLeft:'8px',flexShrink:0,
           background:`${p.color}18`,padding:'2px 7px',borderRadius:'4px'}}>{p.label}</span>
       </div>
@@ -110,27 +101,35 @@ function TaskCard({ task, accent, pjJobs, onClick, onDragStart, onDragEnd, expan
           {pj.pjJobNo} · {pj.pjName}
         </div>
       )}
-      {showProgress && (
-        <div onClick={onClick} style={{marginBottom:'7px'}}>
-          <div style={{display:'flex',justifyContent:'space-between',fontSize:'11px',color:'#9095a0',marginBottom:'3px'}}>
-            <span>サブタスク</span><span>{doneCnt}/{total}</span>
-          </div>
-          <div style={{background:'#e8eaed',borderRadius:'2px',height:'3px'}}>
-            <div style={{background:accent,borderRadius:'2px',height:'3px',
-              width:`${total?doneCnt/total*100:0}%`,transition:'width 0.3s'}} />
-          </div>
+      {task.due && (
+        <div onClick={onClick} style={{fontSize:'11px',color:'#9095a0',marginBottom: hasSubtasks ? '6px' : '0'}}>
+          期限 {task.due}
         </div>
-      )}
-      {!hasSubtasks && task.due && (
-        <div onClick={onClick} style={{fontSize:'11px',color:'#9095a0'}}>期限 {task.due}</div>
-      )}
-      {showProgress && task.due && (
-        <div onClick={onClick} style={{fontSize:'11px',color:'#9095a0'}}>期限 {task.due}</div>
       )}
       {task.estimatedMinutes > 0 && (
         <div onClick={onClick} style={{fontSize:'11px',color:'#BA7517',marginTop:'4px'}}>
           ⏱ {Math.floor(task.estimatedMinutes/60)>0?`${Math.floor(task.estimatedMinutes/60)}時間`:''}
           {task.estimatedMinutes%60>0?`${task.estimatedMinutes%60}分`:''}
+        </div>
+      )}
+      {hasSubtasks && onToggleExpand && (
+        <div onClick={handleToggle}
+          style={{marginTop:'8px',padding:'6px 8px',borderRadius:'6px',cursor:'pointer',
+            background: expanded ? '#f0f4ff' : '#f4f5f7',
+            border:`1px solid ${expanded ? '#c5d5f5' : '#e8eaed'}`,
+            transition:'background 0.15s,border 0.15s'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',
+            fontSize:'11px',color:'#5f6470',marginBottom:'5px'}}>
+            <span style={{display:'flex',alignItems:'center',gap:'4px',fontWeight:'500'}}>
+              <span style={{fontSize:'8px'}}>{expanded?'▼':'▶'}</span>
+              サブタスク
+            </span>
+            <span>{doneCnt}/{total}</span>
+          </div>
+          <div style={{background:'#d8dae0',borderRadius:'2px',height:'4px'}}>
+            <div style={{background:accent,borderRadius:'2px',height:'4px',
+              width:`${total?doneCnt/total*100:0}%`,transition:'width 0.3s'}} />
+          </div>
         </div>
       )}
     </div>
@@ -374,13 +373,38 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
 
   const current = tasks.find(t=>t.id===task.id) || task;
   const selPj   = pjJobs.find(j=>j.id===pjJobId);
+  const showPj  = task.wsId !== 'ws-private' && task.wsId !== 'ws-research';
 
   const save = useCallback(() => {
-    updateTask(task.id, { title, desc, notes, due, priority, status, pjJobId, scheduledDate:schedDate, estimatedMinutes:estMins });
+    updateTask(task.id, { title, desc, notes, due, priority, status, pjJobId, scheduledDate:schedDate,
+      estimatedMinutes: status==='inprogress' ? estMins : (task.estimatedMinutes||0) });
   }, [title,desc,notes,due,priority,status,pjJobId,schedDate,estMins]);
+
+  const dragSubIdx    = useRef(null);
+  const [dragOverSub, setDragOverSub] = useState(null);
+  const [editSubId,   setEditSubId]   = useState(null);
+  const [editSubText, setEditSubText] = useState('');
+
+  const saveSubEdit = (subId) => {
+    if(!editSubText.trim()) { setEditSubId(null); return; }
+    const arr = current.subtasks.map(s=>s.id===subId?{...s,text:editSubText.trim()}:s);
+    updateTask(task.id, { subtasks: arr });
+    setEditSubId(null);
+  };
 
   const handleClose  = () => { save(); onClose(); };
   const handleAddSub = () => { if(!subInput.trim())return; addSubtask(task.id,subInput.trim()); setSubInput(''); };
+
+  const handleSubDrop = (targetIdx) => {
+    if(dragSubIdx.current === null || dragSubIdx.current === targetIdx) {
+      dragSubIdx.current = null; setDragOverSub(null); return;
+    }
+    const arr = [...current.subtasks];
+    const [item] = arr.splice(dragSubIdx.current, 1);
+    arr.splice(targetIdx, 0, item);
+    updateTask(task.id, { subtasks: arr });
+    dragSubIdx.current = null; setDragOverSub(null);
+  };
 
   const aiDecompose = async () => {
     if(!apiKey) { setAiMsg('APIキーが未設定です（サイドバー下部で設定）'); return; }
@@ -402,13 +426,6 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
     setAiLoading(false);
   };
 
-  const addToGCal = () => {
-    const t  = encodeURIComponent(title);
-    const d2 = encodeURIComponent(`${desc||''}\nPJ: ${selPj?.pjName||''}\nJOB: ${selPj?.jobName||''}`);
-    const dt = due?.replace(/-/g,'');
-    window.open(`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${t}${dt?`&dates=${dt}/${dt}`:''}&details=${d2}`,'_blank');
-  };
-
   const sel = {...inputSt, width:'auto', padding:'6px 10px'};
   return (
     <div onClick={e=>{if(e.target===e.currentTarget)handleClose();}}
@@ -427,17 +444,9 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
           style={{...inputSt,fontSize:'17px',fontWeight:'500',background:'transparent',
             border:'none',borderBottom:'1px solid #d0d3db',borderRadius:0,marginBottom:'18px',padding:'4px 0'}} />
 
-        <div style={{display:'flex',gap:'10px',marginBottom:'14px',flexWrap:'wrap'}}>
-          <div><label style={labelSt}>ステータス</label>
-            <select value={status} onChange={e=>setStatus(e.target.value)} style={sel}>
-              <option value="todo">To Do</option><option value="inprogress">In Progress</option><option value="done">完了</option>
-            </select></div>
-          <div><label style={labelSt}>優先度</label>
-            <select value={priority} onChange={e=>setPriority(e.target.value)} style={sel}>
-              <option value="high">高</option><option value="medium">中</option><option value="low">低</option>
-            </select></div>
-          <div><label style={labelSt}>期限日</label>
-            <input type="date" value={due} onChange={e=>setDue(e.target.value)} style={sel}/></div>
+        <div style={{marginBottom:'14px'}}>
+          <label style={labelSt}>期限日</label>
+          <input type="date" value={due} onChange={e=>setDue(e.target.value)} style={sel}/>
         </div>
 
         {/* 想定完了時間（In Progress のとき表示） */}
@@ -463,9 +472,7 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
         {/* Subtasks */}
         <div style={{marginBottom:'18px'}}>
           <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px'}}>
-            <label style={{...labelSt,marginBottom:0}}>
-              サブタスク ({current.subtasks.filter(s=>s.done).length}/{current.subtasks.length})
-            </label>
+            <label style={{...labelSt,marginBottom:0}}>サブタスク ({current.subtasks.length})</label>
             <div style={{display:'flex',gap:'8px',alignItems:'center'}}>
               {aiMsg&&<span style={{fontSize:'11px',color:'#2d6a2d'}}>{aiMsg}</span>}
               <button onClick={aiDecompose} disabled={aiLoading}
@@ -474,16 +481,31 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
               </button>
             </div>
           </div>
-          <div style={{marginBottom:'8px',maxHeight:'180px',overflowY:'auto'}}>
-            {current.subtasks.map(sub=>(
+          <div style={{marginBottom:'8px',maxHeight:'220px',overflowY:'auto'}}>
+            {current.subtasks.map((sub,i)=>(
               <div key={sub.id}
+                draggable
+                onDragStart={()=>{ dragSubIdx.current=i; }}
+                onDragOver={e=>{ e.preventDefault(); setDragOverSub(i); }}
+                onDragLeave={()=>setDragOverSub(null)}
+                onDrop={()=>handleSubDrop(i)}
+                onDragEnd={()=>{ dragSubIdx.current=null; setDragOverSub(null); }}
                 style={{display:'flex',alignItems:'center',gap:'8px',padding:'7px 10px',
-                  borderRadius:'6px',marginBottom:'3px',
-                  background:sub.done?'#e6f4ea':'#f4f5f7'}}>
-                <input type="checkbox" checked={sub.done} onChange={()=>toggleSubtask(task.id,sub.id)}
-                  style={{cursor:'pointer',accentColor:'#1D9E75',flexShrink:0}} />
-                <span style={{flex:1,fontSize:'13px',
-                  color:sub.done?'#9095a0':'#1a1d23',textDecoration:sub.done?'line-through':'none'}}>{sub.text}</span>
+                  borderRadius:'6px',marginBottom:'3px',cursor:'grab',
+                  background: dragOverSub===i ? '#f0f4ff' : '#f4f5f7',
+                  border:`1px solid ${dragOverSub===i?'#378ADD':'transparent'}`,
+                  transition:'background 0.1s,border 0.1s'}}>
+                <span style={{color:'#b0b5bf',fontSize:'14px',flexShrink:0,userSelect:'none'}}>⠿</span>
+                {editSubId===sub.id ? (
+                  <input autoFocus value={editSubText}
+                    onChange={e=>setEditSubText(e.target.value)}
+                    onBlur={()=>saveSubEdit(sub.id)}
+                    onKeyDown={e=>{ if(e.key==='Enter'){e.preventDefault();saveSubEdit(sub.id);} if(e.key==='Escape')setEditSubId(null); }}
+                    style={{...inputSt,flex:1,padding:'2px 6px',fontSize:'13px'}}/>
+                ) : (
+                  <span onClick={()=>{ setEditSubId(sub.id); setEditSubText(sub.text); }}
+                    style={{flex:1,fontSize:'13px',color:'#1a1d23',cursor:'text'}}>{sub.text}</span>
+                )}
                 <button onClick={()=>removeSubtask(task.id,sub.id)}
                   style={{background:'none',border:'none',color:'#b91c1c',cursor:'pointer',fontSize:'13px',lineHeight:1}}>✕</button>
               </div>
@@ -499,7 +521,7 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
         </div>
 
         {/* PJ/JOB 選択 */}
-        <div style={{padding:'14px',background:'#f4f5f7',borderRadius:'8px',border:'1px solid #e8eaed',marginBottom:'16px'}}>
+        {showPj && <div style={{padding:'14px',background:'#f4f5f7',borderRadius:'8px',border:'1px solid #e8eaed',marginBottom:'16px'}}>
           <label style={{...labelSt,marginBottom:'12px',fontSize:'12px'}}>プロジェクト / JOB 情報</label>
           <div style={{marginBottom:'10px'}}>
             <label style={labelSt}>PJ-JOBNo を選択</label>
@@ -528,7 +550,7 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
             <input value={schedDate} onChange={e=>setSchedDate(e.target.value)}
               style={{...inputSt,background:'#ffffff'}} placeholder="YYYY/MM/DD" />
           </div>
-        </div>
+        </div>}
 
         <div style={{marginBottom:'22px'}}>
           <label style={labelSt}>メモ・備考</label>
@@ -536,12 +558,11 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
             style={{...inputSt,resize:'vertical',lineHeight:'1.6'}} placeholder="備考・メモを入力..."/>
         </div>
 
-        <div style={{display:'flex',gap:'10px',flexWrap:'wrap',alignItems:'center'}}>
-          <button onClick={addToGCal}
-            style={{...btnSt('#f4f5f7','#1a1d23','1px solid #d0d3db')}}>Google カレンダーに追加</button>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <button onClick={()=>{
+            if(window.confirm(`「${title}」を削除しますか？`)){deleteTask(task.id);onClose();}
+          }} style={btnSt('#fce8e8','#b91c1c')}>削除</button>
           <button onClick={handleClose} style={btnSt('#e8f0fe','#2c5fcc')}>保存して閉じる</button>
-          <button onClick={()=>{deleteTask(task.id);onClose();}}
-            style={{...btnSt('#fce8e8','#b91c1c'),marginLeft:'auto'}}>削除</button>
         </div>
       </div>
     </div>
@@ -549,14 +570,24 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
 }
 
 // ── ADD TASK MODAL ──────────────────────────────────────────
-function AddTaskModal({ onClose, onAdd, initStatus, pjJobs }) {
+function AddTaskModal({ onClose, onAdd, initStatus, pjJobs, wsId }) {
   const [f, setF] = useState({
     title:'', desc:'', status:initStatus||'todo', priority:'medium',
     due:'', pjJobId:'', scheduledDate:'', notes:'', estimatedMinutes:0,
   });
-  const upd   = k => e => setF(x=>({...x,[k]:e.target.value}));
-  const sel   = {...inputSt, width:'auto', padding:'6px 10px'};
-  const selPj = pjJobs.find(j=>j.id===f.pjJobId);
+  const [subtasks, setSubtasks] = useState([]);
+  const [newSub, setNewSub]     = useState('');
+  const upd    = k => e => setF(x=>({...x,[k]:e.target.value}));
+  const sel    = {...inputSt, width:'auto', padding:'6px 10px'};
+  const selPj  = pjJobs.find(j=>j.id===f.pjJobId);
+  const showPj = wsId !== 'ws-private' && wsId !== 'ws-research';
+
+  const addSub = () => {
+    if(!newSub.trim()) return;
+    setSubtasks(s=>[...s,{id:Date.now(),text:newSub.trim(),done:false,status:'todo',estimatedMinutes:0}]);
+    setNewSub('');
+  };
+  const removeSub = id => setSubtasks(s=>s.filter(x=>x.id!==id));
 
   return (
     <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
@@ -576,40 +607,54 @@ function AddTaskModal({ onClose, onAdd, initStatus, pjJobs }) {
           <label style={labelSt}>説明</label>
           <textarea value={f.desc} onChange={upd('desc')} rows={2} style={{...inputSt,resize:'vertical'}}/>
         </div>
-        <div style={{display:'flex',gap:'10px',marginBottom:'12px',flexWrap:'wrap'}}>
-          <div><label style={labelSt}>ステータス</label>
-            <select value={f.status} onChange={upd('status')} style={sel}>
-              <option value="todo">To Do</option><option value="inprogress">In Progress</option><option value="done">完了</option>
-            </select></div>
-          <div><label style={labelSt}>優先度</label>
-            <select value={f.priority} onChange={upd('priority')} style={sel}>
-              <option value="high">高</option><option value="medium">中</option><option value="low">低</option>
-            </select></div>
-          <div><label style={labelSt}>期限日</label>
-            <input type="date" value={f.due} onChange={upd('due')} style={sel}/></div>
+        <div style={{marginBottom:'12px'}}>
+          <label style={labelSt}>期限日</label>
+          <input type="date" value={f.due} onChange={upd('due')} style={sel}/>
         </div>
 
-        <div style={{padding:'12px',background:'#f4f5f7',borderRadius:'8px',marginBottom:'14px'}}>
-          <label style={{...labelSt,marginBottom:'10px'}}>プロジェクト / JOB</label>
-          <select value={f.pjJobId} onChange={upd('pjJobId')}
-            style={{...inputSt,background:'#ffffff',marginBottom:'8px'}}>
-            <option value="">── 未設定 ──</option>
-            {pjJobs.map(j=>(
-              <option key={j.id} value={j.id}>{j.pjJobNo}｜{j.pjName}</option>
-            ))}
-          </select>
-          {selPj && (
-            <div style={{fontSize:'12px',color:'#5f6470',marginBottom:'8px'}}>JOB名: {selPj.jobName}</div>
-          )}
-          <label style={labelSt}>計上予定日</label>
-          <input value={f.scheduledDate} onChange={upd('scheduledDate')}
-            style={{...inputSt,background:'#ffffff'}} placeholder="YYYY/MM/DD"/>
+        {showPj && (
+          <div style={{padding:'12px',background:'#f4f5f7',borderRadius:'8px',marginBottom:'14px'}}>
+            <label style={{...labelSt,marginBottom:'10px'}}>プロジェクト / JOB</label>
+            <select value={f.pjJobId} onChange={upd('pjJobId')}
+              style={{...inputSt,background:'#ffffff',marginBottom:'8px'}}>
+              <option value="">── 未設定 ──</option>
+              {pjJobs.map(j=>(
+                <option key={j.id} value={j.id}>{j.pjJobNo}｜{j.pjName}</option>
+              ))}
+            </select>
+            {selPj && (
+              <div style={{fontSize:'12px',color:'#5f6470',marginBottom:'8px'}}>JOB名: {selPj.jobName}</div>
+            )}
+            <label style={labelSt}>計上予定日</label>
+            <input value={f.scheduledDate} onChange={upd('scheduledDate')}
+              style={{...inputSt,background:'#ffffff'}} placeholder="YYYY/MM/DD"/>
+          </div>
+        )}
+
+        <div style={{marginBottom:'14px'}}>
+          <label style={labelSt}>サブタスク</label>
+          {subtasks.map(s=>(
+            <div key={s.id} style={{display:'flex',alignItems:'center',gap:'8px',
+              padding:'6px 10px',background:'#f4f5f7',borderRadius:'6px',marginBottom:'6px'}}>
+              <span style={{flex:1,fontSize:'13px',color:'#1a1d23'}}>{s.text}</span>
+              <button onClick={()=>removeSub(s.id)}
+                style={{background:'none',border:'none',cursor:'pointer',color:'#9aa0ad',fontSize:'16px',
+                  lineHeight:1,padding:'0 2px'}}>×</button>
+            </div>
+          ))}
+          <div style={{display:'flex',gap:'8px'}}>
+            <input value={newSub} onChange={e=>setNewSub(e.target.value)}
+              onKeyDown={e=>{ if(e.key==='Enter'){e.preventDefault();addSub();} }}
+              style={{...inputSt,flex:1}} placeholder="サブタスクを入力して Enter または追加"/>
+            <button onClick={addSub}
+              style={{...btnSt('#e8f0fe','#2c5fcc'),whiteSpace:'nowrap'}}>追加</button>
+          </div>
         </div>
 
         <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
           <button onClick={onClose}
             style={{...btnSt('#f4f5f7','#1a1d23','1px solid #d0d3db')}}>キャンセル</button>
-          <button onClick={()=>{if(f.title.trim()){onAdd({...f,id:Date.now(),subtasks:[]});onClose();}}}
+          <button onClick={()=>{if(f.title.trim()){onAdd({...f,id:Date.now(),subtasks});onClose();}}}
             style={btnSt('#e8f0fe','#2c5fcc')}>作成</button>
         </div>
       </div>
@@ -1518,7 +1563,8 @@ export default function App() {
           deleteTask={deleteTask} onClose={()=>setSelTask(null)}/>
       )}
       {showAdd&&(
-        <AddTaskModal initStatus={addStatus} pjJobs={pjJobs} onClose={()=>setShowAdd(false)}
+        <AddTaskModal initStatus={addStatus} pjJobs={pjJobs} wsId={activeWsId}
+          onClose={()=>setShowAdd(false)}
           onAdd={task=>setTasks(ts=>[...ts,{...task,wsId:activeWsId}])}/>
       )}
       {showPjMgr&&(
