@@ -12,6 +12,7 @@ function getWeekDates(offset = 0) {
   });
 }
 const fmtMD  = d => `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+const fmtTs  = ts => { const d = new Date(ts); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
 const DAY_JP = ['月','火','水','木','金','土','日'];
 
 // ── CONSTANTS ──────────────────────────────────────────────
@@ -20,7 +21,7 @@ const COLS = [
   { key:'inprogress', label:'In Progress', accent:'#BA7517', light:'#FAEEDA' },
 ];
 const DONE_COL = { key:'done', label:'完了', accent:'#3B6D11', light:'#EAF3DE' };
-const MEMO_COL = { key:'memo', label:'メモ', accent:'#7c3aed', light:'#f3eeff' };
+const MEMO_COL = { key:'memo', label:'Idea', accent:'#7c3aed', light:'#f3eeff' };
 const ALL_COLS = [...COLS, DONE_COL];
 const PRIO = {
   high:   { label:'高', color:'#A32D2D' },
@@ -69,7 +70,7 @@ const btnSt = (bg, color, border) => ({
 });
 
 // ── TASK CARD ───────────────────────────────────────────────
-function TaskCard({ task, accent, pjJobs, onClick, onDragStart, onDragEnd, expanded, onToggleExpand }) {
+function TaskCard({ task, accent, pjJobs, onClick, onDragStart, onDragEnd, expanded, onToggleExpand, onComplete }) {
   const [hov, setHov] = useState(false);
   const doneCnt = task.subtasks.filter(s=>s.status==='done'||s.done).length;
   const total   = task.subtasks.length;
@@ -106,12 +107,16 @@ function TaskCard({ task, accent, pjJobs, onClick, onDragStart, onDragEnd, expan
           期限 {task.due}
         </div>
       )}
-      {task.estimatedMinutes > 0 && (
+      {task.startedAt ? (
+        <div onClick={onClick} style={{fontSize:'11px',color:'#854F0B',marginTop:'4px',fontWeight:'600'}}>
+          🕐 {fmtTs(task.startedAt)}{task.estimatedMinutes>0?` 〜 ${fmtTs(task.startedAt+task.estimatedMinutes*60000)}`:''}
+        </div>
+      ) : task.estimatedMinutes > 0 ? (
         <div onClick={onClick} style={{fontSize:'11px',color:'#BA7517',marginTop:'4px'}}>
           ⏱ {Math.floor(task.estimatedMinutes/60)>0?`${Math.floor(task.estimatedMinutes/60)}時間`:''}
           {task.estimatedMinutes%60>0?`${task.estimatedMinutes%60}分`:''}
         </div>
-      )}
+      ) : null}
       {hasSubtasks && onToggleExpand && (
         <div onClick={handleToggle}
           style={{marginTop:'8px',padding:'6px 8px',borderRadius:'6px',cursor:'pointer',
@@ -130,6 +135,14 @@ function TaskCard({ task, accent, pjJobs, onClick, onDragStart, onDragEnd, expan
             <div style={{background:accent,borderRadius:'2px',height:'4px',
               width:`${total?doneCnt/total*100:0}%`,transition:'width 0.3s'}} />
           </div>
+        </div>
+      )}
+      {onComplete && hov && (
+        <div style={{marginTop:'8px',display:'flex',justifyContent:'flex-end'}}>
+          <button onClick={e=>{e.stopPropagation();onComplete();}}
+            style={{...btnSt('#EAF3DE','#3B6D11'),fontSize:'11px',padding:'4px 12px'}}>
+            ✓ 完了
+          </button>
         </div>
       )}
     </div>
@@ -157,7 +170,7 @@ function SubtaskTextRow({ subtask, onDragStart, onDragEnd }) {
 }
 
 // ── SUBTASK CARD（In Progress 表示用）────────────────────────
-function SubtaskInProgressCard({ subtask, parentTask, onDragStart, onDragEnd, onOpenParent }) {
+function SubtaskInProgressCard({ subtask, parentTask, onDragStart, onDragEnd, onOpenParent, onComplete }) {
   const [hov, setHov] = useState(false);
   return (
     <div draggable onDragStart={onDragStart} onDragEnd={onDragEnd}
@@ -178,11 +191,21 @@ function SubtaskInProgressCard({ subtask, parentTask, onDragStart, onDragEnd, on
             {parentTask.title}
           </span>
         </div>
-        {subtask.estimatedMinutes > 0 && (
+        {subtask.startedAt ? (
+          <span style={{fontSize:'11px', color:'#854F0B', flexShrink:0, fontWeight:'600'}}>
+            🕐 {fmtTs(subtask.startedAt)}{subtask.estimatedMinutes>0?` 〜 ${fmtTs(subtask.startedAt+subtask.estimatedMinutes*60000)}`:''}
+          </span>
+        ) : subtask.estimatedMinutes > 0 ? (
           <span style={{fontSize:'11px', color:'#BA7517', flexShrink:0}}>
             ⏱ {Math.floor(subtask.estimatedMinutes/60)>0?`${Math.floor(subtask.estimatedMinutes/60)}時間`:''}
             {subtask.estimatedMinutes%60>0?`${subtask.estimatedMinutes%60}分`:''}
           </span>
+        ) : null}
+        {onComplete && hov && (
+          <button onClick={e=>{e.stopPropagation();onComplete();}}
+            style={{...btnSt('#EAF3DE','#3B6D11'),fontSize:'11px',padding:'3px 10px',flexShrink:0}}>
+            ✓ 完了
+          </button>
         )}
       </div>
     </div>
@@ -245,6 +268,156 @@ function EstimatedTimeModal({ taskTitle, onConfirm, onCancel }) {
   );
 }
 
+// ── TIME SELECT（常に下方向に開くカスタムドロップダウン）────────
+function TimeSelect({ options, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = e => { if (!rootRef.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !listRef.current) return;
+    listRef.current.querySelector('[data-sel]')?.scrollIntoView({block:'nearest'});
+  }, [open]);
+
+  return (
+    <div ref={rootRef} style={{position:'relative',display:'inline-block'}}>
+      <button onClick={()=>setOpen(v=>!v)}
+        style={{fontSize:'22px',fontWeight:'700',color:'#1a1d23',
+          border:`1px solid ${open?'#378ADD':'#d0d3db'}`,borderRadius:'6px',
+          background:'#ffffff',padding:'4px 10px',cursor:'pointer',
+          fontFamily:'inherit',fontVariantNumeric:'tabular-nums',
+          display:'flex',alignItems:'center',gap:'6px',outline:'none'}}>
+        {value}
+        <span style={{fontSize:'9px',color:'#9095a0',lineHeight:1}}>▼</span>
+      </button>
+      {open && (
+        <div ref={listRef}
+          style={{position:'absolute',top:'calc(100% + 4px)',left:0,zIndex:400,
+            background:'#ffffff',border:'1px solid #d0d3db',borderRadius:'8px',
+            boxShadow:'0 4px 20px rgba(0,0,0,0.14)',maxHeight:'200px',overflowY:'auto',
+            minWidth:'100%',scrollbarWidth:'thin'}}>
+          {options.map(opt=>(
+            <div key={opt} data-sel={opt===value?'':undefined}
+              onClick={()=>{onChange(opt);setOpen(false);}}
+              style={{padding:'7px 16px',cursor:'pointer',fontSize:'18px',
+                fontVariantNumeric:'tabular-nums',fontWeight:opt===value?'700':'400',
+                color:opt===value?'#2c5fcc':'#1a1d23',
+                background:opt===value?'#e8f0fe':'transparent'}}>
+              {opt}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── COMPLETE TASK MODAL ──────────────────────────────────────
+const HOUR_OPTIONS = Array.from({length: 24}, (_, i) => String(i).padStart(2,'0'));
+const MIN_OPTIONS  = ['00', '15', '30', '45'];
+
+function CompleteTaskModal({ taskTitle, startedAt, onConfirm, onCancel }) {
+  const now = new Date();
+  const roundedM = Math.round(now.getMinutes() / 15) * 15;
+  const roundedH = (now.getHours() + Math.floor(roundedM / 60)) % 24;
+  const [endH, setEndH] = useState(String(roundedH).padStart(2,'0'));
+  const [endM, setEndM] = useState(String(roundedM % 60).padStart(2,'0'));
+
+  const startStr = startedAt ? fmtTs(startedAt) : null;
+
+  const actualMins = (() => {
+    if (!startedAt) return null;
+    const endTs = new Date(startedAt);
+    endTs.setHours(Number(endH), Number(endM), 0, 0);
+    if (endTs <= startedAt) endTs.setDate(endTs.getDate() + 1);
+    const diff = Math.round((endTs.getTime() - startedAt) / 60000);
+    return diff > 0 ? diff : null;
+  })();
+
+  const fmtDur = mins => {
+    if (!mins || mins <= 0) return null;
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return `${h > 0 ? `${h}時間` : ''}${m > 0 ? `${m}分` : ''}`;
+  };
+
+  const lbl = {fontSize:'10px',fontWeight:'600',color:'#9095a0',marginBottom:'6px',letterSpacing:'0.05em',textAlign:'center'};
+
+  return (
+    <div onClick={onCancel}
+      style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:250,
+        display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}>
+      <div onClick={e=>e.stopPropagation()}
+        style={{background:'#ffffff',borderRadius:'12px',border:'1px solid #e8eaed',
+          width:'100%',maxWidth:'380px',padding:'26px',
+          boxShadow:'0 8px 32px rgba(0,0,0,0.12)'}}>
+        <h2 style={{fontSize:'15px',fontWeight:'600',color:'#1a1d23',marginBottom:'6px'}}>
+          タスクを完了にする
+        </h2>
+        <div style={{fontSize:'13px',color:'#5f6470',marginBottom:'20px',
+          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+          {taskTitle}
+        </div>
+
+        <div style={{background:'#f4f5f7',borderRadius:'12px',marginBottom:'20px'}}>
+          {/* 上段: 開始 → 終了 */}
+          <div style={{display:'flex',alignItems:'stretch',
+            ...(startStr?{borderBottom:'1px solid #e0e3e8'}:{})}}>
+            {startStr && (
+              <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',
+                justifyContent:'center',gap:'5px',padding:'14px 8px',
+                borderRight:'1px solid #e0e3e8'}}>
+                <div style={{...lbl,marginBottom:0}}>開始</div>
+                <div style={{fontSize:'22px',fontWeight:'700',color:'#9095a0',
+                  fontVariantNumeric:'tabular-nums',lineHeight:1.2,
+                  padding:'4px 10px',border:'1px solid transparent',borderRadius:'6px'}}>
+                  {startStr}
+                </div>
+              </div>
+            )}
+            <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',
+              justifyContent:'center',gap:'5px',padding:'14px 8px'}}>
+              <div style={{...lbl,marginBottom:0}}>終了</div>
+              <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
+                <TimeSelect options={HOUR_OPTIONS} value={endH} onChange={setEndH}/>
+                <span style={{fontSize:'22px',fontWeight:'700',color:'#1a1d23',lineHeight:1}}>:</span>
+                <TimeSelect options={MIN_OPTIONS} value={endM} onChange={setEndM}/>
+              </div>
+            </div>
+          </div>
+          {/* 下段: 実績 */}
+          {startStr && (
+            <div style={{display:'flex',alignItems:'center',justifyContent:'center',
+              gap:'8px',padding:'10px 16px'}}>
+              <span style={{fontSize:'11px',fontWeight:'600',color:'#9095a0',letterSpacing:'0.05em'}}>実績</span>
+              <span style={{fontSize:'18px',fontWeight:'700',whiteSpace:'nowrap',
+                color: fmtDur(actualMins) ? '#3B6D11' : '#c0c4cc',fontVariantNumeric:'tabular-nums'}}>
+                {fmtDur(actualMins) || '—'}
+              </span>
+            </div>
+          )}
+        </div>
+
+        <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
+          <button onClick={onCancel}
+            style={{...btnSt('#f4f5f7','#1a1d23','1px solid #d0d3db')}}>
+            キャンセル
+          </button>
+          <button onClick={()=>onConfirm(actualMins)} style={btnSt('#EAF3DE','#3B6D11')}>
+            完了にする
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── SCHEDULE MODAL ──────────────────────────────────────────
 const LUNCH_START = 12 * 60; // 720
 const LUNCH_END   = 13 * 60; // 780
@@ -268,12 +441,14 @@ function calcSchedule(rawItems) {
   });
 }
 
-function ScheduleModal({ rawItems, onClose }) {
+function ScheduleModal({ rawItems, onClose, onApply }) {
   const [order, setOrder]       = useState(rawItems);
   const [dragOverIdx, setDragOverIdx] = useState(null);
   const dragIdx = useRef(null);
   const fmtTime = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
   const computed = useMemo(() => calcSchedule(order), [order]);
+
+  const handleClose = () => { onApply?.(computed); onClose(); };
 
   const handleDrop = (targetIdx) => {
     if(dragIdx.current === null || dragIdx.current === targetIdx) {
@@ -292,7 +467,7 @@ function ScheduleModal({ rawItems, onClose }) {
   };
 
   return (
-    <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
+    <div onClick={e=>{if(e.target===e.currentTarget)handleClose();}}
       style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:250,
         display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}>
       <div onClick={e=>e.stopPropagation()}
@@ -303,7 +478,7 @@ function ScheduleModal({ rawItems, onClose }) {
           <h2 style={{fontSize:'15px',fontWeight:'600',color:'#1a1d23'}}>
             📅 本日のスケジュール（10:00 始業）
           </h2>
-          <button onClick={onClose}
+          <button onClick={handleClose}
             style={{background:'none',border:'none',fontSize:'17px',cursor:'pointer',color:'#9095a0'}}>✕</button>
         </div>
         <div style={{fontSize:'11px',color:'#9095a0',marginBottom:'16px'}}>
@@ -345,7 +520,7 @@ function ScheduleModal({ rawItems, onClose }) {
           ))}
         </div>
         <div style={{textAlign:'center'}}>
-          <button onClick={onClose}
+          <button onClick={handleClose}
             style={{...btnSt('#f4f5f7','#1a1d23','1px solid #d0d3db')}}>閉じる</button>
         </div>
       </div>
@@ -863,6 +1038,22 @@ function AplexView({ tasks, pjJobs, weekDates, timeData, setTime }) {
     return acc;
   },[]);
 
+  const computeJobHours = (pjJobId, date) => {
+    const sameDay = ts => {
+      const d = new Date(ts);
+      return d.getFullYear()===date.getFullYear()&&d.getMonth()===date.getMonth()&&d.getDate()===date.getDate();
+    };
+    const jobTasks = tasks.filter(t=>t.pjJobId===pjJobId);
+    const main = jobTasks
+      .filter(t=>t.status==='done'&&t.actualMinutes&&t.completedAt&&sameDay(t.completedAt))
+      .reduce((sum,t)=>sum+t.actualMinutes/60, 0);
+    const subs = jobTasks
+      .flatMap(t=>t.subtasks||[])
+      .filter(s=>s.status==='done'&&s.actualMinutes&&s.completedAt&&sameDay(s.completedAt))
+      .reduce((sum,s)=>sum+s.actualMinutes/60, 0);
+    return main + subs;
+  };
+
   const thSt = (sat,sun) => ({
     padding:'6px 8px', textAlign:'center', fontWeight:'600', fontSize:'12px',
     background:sun?'#ffeaea':sat?'#dceeff':'#dde5f4', color:'#1a1d23', border:'1px solid #aab',
@@ -936,21 +1127,15 @@ function AplexView({ tasks, pjJobs, weekDates, timeData, setTime }) {
                   <td style={{...tdSt(false,false),background:'#f8f9ff',fontWeight:'500',
                     textAlign:'left',paddingLeft:'10px',width:'100px',fontSize:'11px'}}>☆データ処理</td>
                   {weekDates.map((d,i)=>{
-                    const dk=`${d.getFullYear()}_${d.getMonth()}_${d.getDate()}`;
+                    const h=computeJobHours(job.pjJobId,d);
                     return(
-                      <td key={i} style={tdSt(i===5,i===6)}>
-                        <input type="number" min="0" max="24" step="0.5"
-                          value={(timeData[job.pjJobId]||{})[dk]||''}
-                          onChange={e=>setTime(job.pjJobId,dk,e.target.value)}
-                          style={{width:'44px',border:'none',background:'transparent',textAlign:'center',fontSize:'12px',outline:'none'}}/>
+                      <td key={i} style={{...tdSt(i===5,i===6),color:h>0?'#1a1d23':'#c0c4cc'}}>
+                        {h>0?h.toFixed(1):'—'}
                       </td>
                     );
                   })}
                   <td style={{...tdSt(false,false),fontWeight:'500',background:'#eef0f8'}}>
-                    {weekDates.reduce((s,d)=>{
-                      const dk=`${d.getFullYear()}_${d.getMonth()}_${d.getDate()}`;
-                      return s+(parseFloat((timeData[job.pjJobId]||{})[dk])||0);
-                    },0).toFixed(1)}h
+                    {weekDates.reduce((s,d)=>s+computeJobHours(job.pjJobId,d),0).toFixed(1)}h
                   </td>
                 </tr>
               </tbody>
@@ -1025,7 +1210,7 @@ function AddMemoModal({ onClose, onAdd }) {
         style={{background:'#ffffff', borderRadius:'12px', border:'1px solid #e8eaed',
           width:'100%', maxWidth:'400px', padding:'26px',
           boxShadow:'0 8px 32px rgba(0,0,0,0.12)'}}>
-        <h2 style={{fontSize:'16px', fontWeight:'600', color:'#1a1d23', marginBottom:'18px'}}>新しいメモ</h2>
+        <h2 style={{fontSize:'16px', fontWeight:'600', color:'#1a1d23', marginBottom:'18px'}}>新しい Idea</h2>
 
         <div style={{marginBottom:'14px'}}>
           <label style={labelSt}>内容 *</label>
@@ -1121,7 +1306,8 @@ export default function App() {
   const [apiKey, setApiKey]         = useState(()=>localStorage.getItem('tm-apikey')||'');
   const [showApiKey, setShowApiKey] = useState(false);
   const [showDone, setShowDone]     = useState(false);
-  const [pendingIP, setPendingIP]     = useState(null); // {taskId, title}
+  const [pendingIP, setPendingIP]         = useState(null); // {taskId, title}
+  const [pendingComplete, setPendingComplete] = useState(null); // {taskId, subId?, title, isSub?}
   const [scheduleItems, setScheduleItems] = useState(null); // ScheduleModal用
 
   // ── Save to localStorage on change ──
@@ -1151,7 +1337,7 @@ export default function App() {
   const updateSubtaskStatus = (taskId,subId,newStatus,estimatedMinutes) => setTasks(ts=>ts.map(t=>{
     if(t.id!==taskId) return t;
     const newSubs = t.subtasks.map(s=>s.id===subId
-      ? {...s, status:newStatus, ...(estimatedMinutes!=null?{estimatedMinutes}:{})}
+      ? {...s, status:newStatus, ...(estimatedMinutes!=null?{estimatedMinutes}:{}), ...(newStatus==='inprogress'?{startedAt:Date.now()}:{})}
       : s);
     const allDone = newSubs.length>0 && newSubs.every(s=>s.status==='done'||s.done);
     return {...t, subtasks:newSubs, status: allDone?'done':t.status};
@@ -1180,14 +1366,34 @@ export default function App() {
     const ipSubtasks = wsTasks.flatMap(t =>
       t.subtasks
         .filter(s => s.status === 'inprogress')
-        .map(s => ({title:`${t.title}：${s.text}`, estimatedMinutes: s.estimatedMinutes || 0}))
+        .map(s => ({taskId:t.id, subId:s.id, title:`${t.title}：${s.text}`, estimatedMinutes: s.estimatedMinutes || 0}))
     );
     const allItems = [
-      ...ipTasks.map(t => ({title: t.title, estimatedMinutes: t.estimatedMinutes || 0})),
+      ...ipTasks.map(t => ({taskId:t.id, title: t.title, estimatedMinutes: t.estimatedMinutes || 0})),
       ...ipSubtasks,
     ];
     if(allItems.length === 0) return;
     setScheduleItems(allItems);
+  };
+
+  const applySchedule = (computedItems) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    setTasks(ts => {
+      let updated = ts;
+      computedItems.forEach(item => {
+        const startTs = today.getTime() + item.startMins * 60000;
+        if (item.subId) {
+          updated = updated.map(t => {
+            if (t.id !== item.taskId) return t;
+            return {...t, subtasks: t.subtasks.map(s => s.id === item.subId ? {...s, startedAt: startTs} : s)};
+          });
+        } else if (item.taskId) {
+          updated = updated.map(t => t.id === item.taskId ? {...t, startedAt: startTs} : t);
+        }
+      });
+      return updated;
+    });
   };
 
   return (
@@ -1441,7 +1647,8 @@ export default function App() {
                                 onToggleExpand={hasChildren ? ()=>toggleExpand(task.id) : undefined}
                                 onClick={()=>setSelTask({...task})}
                                 onDragStart={()=>{ if(canDragToIP||col.key!=='todo') dragIdRef.current=task.id; }}
-                                onDragEnd={()=>{ dragIdRef.current=null; }}/>
+                                onDragEnd={()=>{ dragIdRef.current=null; }}
+                                onComplete={col.key==='inprogress' ? ()=>setPendingComplete({taskId:task.id, title:task.title, startedAt:task.startedAt}) : undefined}/>
                               {/* To Do展開：テキストのみ表示 */}
                               {hasChildren && isExpanded && (
                                 <div style={{marginLeft:'14px', paddingLeft:'12px',
@@ -1464,7 +1671,8 @@ export default function App() {
                             <SubtaskInProgressCard key={sub.id} subtask={sub} parentTask={task}
                               onDragStart={()=>{ dragSubInfoRef.current={taskId:task.id, subId:sub.id}; }}
                               onDragEnd={()=>{ dragSubInfoRef.current=null; }}
-                              onOpenParent={()=>setSelTask({...task})}/>
+                              onOpenParent={()=>setSelTask({...task})}
+                              onComplete={()=>setPendingComplete({taskId:task.id, subId:sub.id, title:sub.text, isSub:true, startedAt:sub.startedAt})}/>
                           ))
                         ))}
                       </div>
@@ -1577,7 +1785,7 @@ export default function App() {
           onClose={()=>setShowWsMgr(false)}/>
       )}
       {scheduleItems&&(
-        <ScheduleModal rawItems={scheduleItems} onClose={()=>setScheduleItems(null)}/>
+        <ScheduleModal rawItems={scheduleItems} onClose={()=>setScheduleItems(null)} onApply={applySchedule}/>
       )}
       {pendingIP&&(
         <EstimatedTimeModal
@@ -1586,11 +1794,33 @@ export default function App() {
             if(pendingIP.isSub){
               updateSubtaskStatus(pendingIP.taskId, pendingIP.subId, 'inprogress', mins);
             } else {
-              updateTask(pendingIP.taskId, {status:'inprogress', estimatedMinutes:mins});
+              updateTask(pendingIP.taskId, {status:'inprogress', estimatedMinutes:mins, startedAt:Date.now()});
             }
             setPendingIP(null);
           }}
           onCancel={()=>setPendingIP(null)}
+        />
+      )}
+      {pendingComplete&&(
+        <CompleteTaskModal
+          taskTitle={pendingComplete.title}
+          startedAt={pendingComplete.startedAt}
+          onConfirm={mins=>{
+            if(pendingComplete.isSub){
+              setTasks(ts=>ts.map(t=>{
+                if(t.id!==pendingComplete.taskId) return t;
+                const newSubs = t.subtasks.map(s=>s.id===pendingComplete.subId
+                  ? {...s, status:'done', done:true, actualMinutes:mins, completedAt:Date.now()}
+                  : s);
+                const allDone = newSubs.length>0 && newSubs.every(s=>s.status==='done'||s.done);
+                return {...t, subtasks:newSubs, status:allDone?'done':t.status};
+              }));
+            } else {
+              updateTask(pendingComplete.taskId, {status:'done', actualMinutes:mins, completedAt:Date.now()});
+            }
+            setPendingComplete(null);
+          }}
+          onCancel={()=>setPendingComplete(null)}
         />
       )}
     </>
