@@ -332,12 +332,16 @@ function CompleteTaskModal({ taskTitle, startedAt, onConfirm, onCancel }) {
 
   const startStr = startedAt ? fmtTs(startedAt) : null;
 
+  const endTs = (() => {
+    const base = startedAt ? new Date(startedAt) : new Date();
+    base.setHours(Number(endH), Number(endM), 0, 0);
+    if (startedAt && base.getTime() <= startedAt) base.setDate(base.getDate() + 1);
+    return base.getTime();
+  })();
+
   const actualMins = (() => {
     if (!startedAt) return null;
-    const endTs = new Date(startedAt);
-    endTs.setHours(Number(endH), Number(endM), 0, 0);
-    if (endTs <= startedAt) endTs.setDate(endTs.getDate() + 1);
-    const diff = Math.round((endTs.getTime() - startedAt) / 60000);
+    const diff = Math.round((endTs - startedAt) / 60000);
     return diff > 0 ? diff : null;
   })();
 
@@ -409,7 +413,7 @@ function CompleteTaskModal({ taskTitle, startedAt, onConfirm, onCancel }) {
             style={{...btnSt('#f4f5f7','#1a1d23','1px solid #d0d3db')}}>
             キャンセル
           </button>
-          <button onClick={()=>onConfirm(actualMins)} style={btnSt('#EAF3DE','#3B6D11')}>
+          <button onClick={()=>onConfirm(actualMins, endTs)} style={btnSt('#EAF3DE','#3B6D11')}>
             完了にする
           </button>
         </div>
@@ -441,7 +445,7 @@ function calcSchedule(rawItems) {
   });
 }
 
-function ScheduleModal({ rawItems, onClose, onApply }) {
+function ScheduleModal({ rawItems, onClose, onApply, onComplete }) {
   const [order, setOrder]       = useState(rawItems);
   const [dragOverIdx, setDragOverIdx] = useState(null);
   const dragIdx = useRef(null);
@@ -516,6 +520,13 @@ function ScheduleModal({ rawItems, onClose, onApply }) {
                   textDecoration:'none',flexShrink:0}}>
                 追加
               </a>
+              {/* 完了ボタン */}
+              {onComplete && (
+                <button onClick={e=>{e.stopPropagation(); onComplete(item, computed);}}
+                  style={{...btnSt('#EAF3DE','#3B6D11'),fontSize:'12px',padding:'5px 14px',flexShrink:0}}>
+                  完了
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -1366,10 +1377,10 @@ export default function App() {
     const ipSubtasks = wsTasks.flatMap(t =>
       t.subtasks
         .filter(s => s.status === 'inprogress')
-        .map(s => ({taskId:t.id, subId:s.id, title:`${t.title}：${s.text}`, estimatedMinutes: s.estimatedMinutes || 0}))
+        .map(s => ({taskId:t.id, subId:s.id, title:`${t.title}：${s.text}`, estimatedMinutes: s.estimatedMinutes || 0, startedAt: s.startedAt, wsId: t.wsId}))
     );
     const allItems = [
-      ...ipTasks.map(t => ({taskId:t.id, title: t.title, estimatedMinutes: t.estimatedMinutes || 0})),
+      ...ipTasks.map(t => ({taskId:t.id, title: t.title, estimatedMinutes: t.estimatedMinutes || 0, startedAt: t.startedAt, wsId: t.wsId})),
       ...ipSubtasks,
     ];
     if(allItems.length === 0) return;
@@ -1648,7 +1659,7 @@ export default function App() {
                                 onClick={()=>setSelTask({...task})}
                                 onDragStart={()=>{ if(canDragToIP||col.key!=='todo') dragIdRef.current=task.id; }}
                                 onDragEnd={()=>{ dragIdRef.current=null; }}
-                                onComplete={col.key==='inprogress' ? ()=>setPendingComplete({taskId:task.id, title:task.title, startedAt:task.startedAt}) : undefined}/>
+                                />
                               {/* To Do展開：テキストのみ表示 */}
                               {hasChildren && isExpanded && (
                                 <div style={{marginLeft:'14px', paddingLeft:'12px',
@@ -1672,7 +1683,7 @@ export default function App() {
                               onDragStart={()=>{ dragSubInfoRef.current={taskId:task.id, subId:sub.id}; }}
                               onDragEnd={()=>{ dragSubInfoRef.current=null; }}
                               onOpenParent={()=>setSelTask({...task})}
-                              onComplete={()=>setPendingComplete({taskId:task.id, subId:sub.id, title:sub.text, isSub:true, startedAt:sub.startedAt})}/>
+                              />
                           ))
                         ))}
                       </div>
@@ -1700,7 +1711,7 @@ export default function App() {
                               width:'100%',fontSize:'12px',
                               opacity:disabled?0.4:1,
                               cursor:disabled?'default':'pointer'}}>
-                            📅 Googleカレンダーに追加
+                            📅 本日のスケジュール
                           </button>
                             );
                           })()}
@@ -1785,7 +1796,21 @@ export default function App() {
           onClose={()=>setShowWsMgr(false)}/>
       )}
       {scheduleItems&&(
-        <ScheduleModal rawItems={scheduleItems} onClose={()=>setScheduleItems(null)} onApply={applySchedule}/>
+        <ScheduleModal rawItems={scheduleItems} onClose={()=>setScheduleItems(null)} onApply={applySchedule}
+          onComplete={(item, computed)=>{
+            applySchedule(computed);
+            setScheduleItems(null);
+            const today = new Date(); today.setHours(0,0,0,0);
+            const scheduledStartTs = today.getTime() + item.startMins * 60000;
+            setPendingComplete({
+              taskId: item.taskId,
+              subId: item.subId,
+              isSub: !!item.subId,
+              title: item.title,
+              startedAt: scheduledStartTs,
+              wsId: item.wsId,
+            });
+          }}/>
       )}
       {pendingIP&&(
         <EstimatedTimeModal
@@ -1805,7 +1830,7 @@ export default function App() {
         <CompleteTaskModal
           taskTitle={pendingComplete.title}
           startedAt={pendingComplete.startedAt}
-          onConfirm={mins=>{
+          onConfirm={(mins, endTs)=>{
             if(pendingComplete.isSub){
               setTasks(ts=>ts.map(t=>{
                 if(t.id!==pendingComplete.taskId) return t;
@@ -1817,6 +1842,21 @@ export default function App() {
               }));
             } else {
               updateTask(pendingComplete.taskId, {status:'done', actualMinutes:mins, completedAt:Date.now()});
+
+              // 以降のスケジュール済みタスクを一括シフト
+              if(endTs && pendingComplete.startedAt){
+                const subsequent = tasks
+                  .filter(t=>t.wsId===pendingComplete.wsId && t.status!=='done' && t.id!==pendingComplete.taskId && t.startedAt)
+                  .filter(t=>t.startedAt > pendingComplete.startedAt)
+                  .sort((a,b)=>a.startedAt - b.startedAt);
+                if(subsequent.length > 0){
+                  const delta = endTs - subsequent[0].startedAt;
+                  if(delta !== 0){
+                    const shiftIds = new Set(subsequent.map(t=>t.id));
+                    setTasks(ts=>ts.map(t=>shiftIds.has(t.id) ? {...t, startedAt: t.startedAt + delta} : t));
+                  }
+                }
+              }
             }
             setPendingComplete(null);
           }}
