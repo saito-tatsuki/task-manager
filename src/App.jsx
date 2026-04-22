@@ -45,10 +45,10 @@ const INIT_TASKS = [
   { id:1, wsId:'ws-work', title:'MONOTARO登録データ作成', desc:'UCD88下期のインサイトシミュレーション',
     status:'todo', priority:'high', due:'2026-07-20',
     subtasks:[{id:1,text:'データ収集・整理',done:false},{id:2,text:'フォーマット確認',done:true}],
-    pjJobId:'pj1', scheduledDate:'2026/07/20', notes:'' },
+    pjJobId:'pj1', scheduledDate:'2026/07/20', notes:'', estimatedMinutes:0 },
   { id:2, wsId:'ws-work', title:'大阪すくすくウォッチ 結果出力', desc:'5・6年生の結果提供出力処理',
     status:'todo', priority:'medium', due:'2026-10-31', subtasks:[],
-    pjJobId:'pj2', scheduledDate:'2026/10/31', notes:'' },
+    pjJobId:'pj2', scheduledDate:'2026/10/31', notes:'', estimatedMinutes:0 },
 ];
 const INIT_MEMOS = [{ id:1, wsId:'ws-work', text:'', color:'#fffde7' }];
 
@@ -127,6 +127,12 @@ function TaskCard({ task, accent, pjJobs, onClick, onDragStart, onDragEnd, expan
       {showProgress && task.due && (
         <div onClick={onClick} style={{fontSize:'11px',color:'#9095a0'}}>期限 {task.due}</div>
       )}
+      {task.estimatedMinutes > 0 && (
+        <div onClick={onClick} style={{fontSize:'11px',color:'#BA7517',marginTop:'4px'}}>
+          ⏱ {Math.floor(task.estimatedMinutes/60)>0?`${Math.floor(task.estimatedMinutes/60)}時間`:''}
+          {task.estimatedMinutes%60>0?`${task.estimatedMinutes%60}分`:''}
+        </div>
+      )}
     </div>
   );
 }
@@ -165,12 +171,129 @@ function SubtaskInProgressCard({ subtask, parentTask, onDragStart, onDragEnd, on
         lineHeight:'1.4', marginBottom:'5px'}}>
         {subtask.text}
       </div>
-      <div onClick={onOpenParent} style={{fontSize:'11px', color:'#9095a0',
-        cursor:'pointer', display:'flex', alignItems:'center', gap:'3px'}}>
-        <span>↳</span>
-        <span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
-          {parentTask.title}
-        </span>
+      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:'6px'}}>
+        <div onClick={onOpenParent} style={{fontSize:'11px', color:'#9095a0',
+          cursor:'pointer', display:'flex', alignItems:'center', gap:'3px', flex:1, minWidth:0}}>
+          <span>↳</span>
+          <span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>
+            {parentTask.title}
+          </span>
+        </div>
+        {subtask.estimatedMinutes > 0 && (
+          <span style={{fontSize:'11px', color:'#BA7517', flexShrink:0}}>
+            ⏱ {Math.floor(subtask.estimatedMinutes/60)>0?`${Math.floor(subtask.estimatedMinutes/60)}時間`:''}
+            {subtask.estimatedMinutes%60>0?`${subtask.estimatedMinutes%60}分`:''}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── ESTIMATED TIME MODAL ─────────────────────────────────────
+function EstimatedTimeModal({ taskTitle, onConfirm, onSkip }) {
+  const [hours, setHours]     = useState(0);
+  const [minutes, setMinutes] = useState(30);
+
+  const handleConfirm = () => {
+    const total = parseInt(hours || 0) * 60 + parseInt(minutes || 0);
+    onConfirm(total > 0 ? total : 30);
+  };
+
+  return (
+    <div onClick={onSkip}
+      style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:250,
+        display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}>
+      <div onClick={e=>e.stopPropagation()}
+        style={{background:'#ffffff',borderRadius:'12px',border:'1px solid #e8eaed',
+          width:'100%',maxWidth:'380px',padding:'26px',
+          boxShadow:'0 8px 32px rgba(0,0,0,0.12)'}}>
+        <h2 style={{fontSize:'15px',fontWeight:'600',color:'#1a1d23',marginBottom:'6px'}}>
+          想定完了時間を設定
+        </h2>
+        <div style={{fontSize:'13px',color:'#5f6470',marginBottom:'20px',
+          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+          {taskTitle}
+        </div>
+
+        <div style={{display:'flex',gap:'12px',alignItems:'flex-end',marginBottom:'24px'}}>
+          <div style={{flex:1}}>
+            <label style={labelSt}>時間</label>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <input type="number" min="0" max="23" value={hours}
+                onChange={e=>setHours(e.target.value)}
+                style={{...inputSt,textAlign:'center'}} />
+              <span style={{color:'#5f6470',fontSize:'13px',flexShrink:0}}>時間</span>
+            </div>
+          </div>
+          <div style={{flex:1}}>
+            <label style={labelSt}>分</label>
+            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
+              <input type="number" min="0" max="59" step="5" value={minutes}
+                onChange={e=>setMinutes(e.target.value)}
+                style={{...inputSt,textAlign:'center'}} />
+              <span style={{color:'#5f6470',fontSize:'13px',flexShrink:0}}>分</span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
+          <button onClick={onSkip}
+            style={{...btnSt('#f4f5f7','#1a1d23','1px solid #d0d3db'),fontSize:'12px'}}>
+            スキップ
+          </button>
+          <button onClick={handleConfirm} style={btnSt('#e8f0fe','#2c5fcc')}>
+            設定して移動
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── SCHEDULE MODAL ──────────────────────────────────────────
+function ScheduleModal({ items, onClose }) {
+  const fmtTime = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+  return (
+    <div onClick={e=>{if(e.target===e.currentTarget)onClose();}}
+      style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:250,
+        display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}>
+      <div onClick={e=>e.stopPropagation()}
+        style={{background:'#ffffff',borderRadius:'12px',border:'1px solid #e8eaed',
+          width:'100%',maxWidth:'540px',padding:'28px',
+          boxShadow:'0 8px 32px rgba(0,0,0,0.12)',maxHeight:'80vh',display:'flex',flexDirection:'column'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'18px'}}>
+          <h2 style={{fontSize:'15px',fontWeight:'600',color:'#1a1d23'}}>
+            📅 本日のスケジュール（10:00 始業）
+          </h2>
+          <button onClick={onClose}
+            style={{background:'none',border:'none',fontSize:'17px',cursor:'pointer',color:'#9095a0'}}>✕</button>
+        </div>
+        <div style={{overflowY:'auto',flex:1,marginBottom:'16px'}}>
+          {items.map((item,i)=>(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:'10px',
+              padding:'10px 12px',borderRadius:'8px',marginBottom:'6px',
+              background:i%2===0?'#f9fafb':'#ffffff',border:'1px solid #e8eaed'}}>
+              <div style={{fontSize:'12px',color:'#BA7517',fontWeight:'600',
+                flexShrink:0,minWidth:'116px'}}>
+                {fmtTime(item.startMins)} 〜 {fmtTime(item.endMins)}
+              </div>
+              <div style={{flex:1,fontSize:'13px',color:'#1a1d23',
+                overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                {item.title}
+              </div>
+              <a href={item.url} target="_blank" rel="noreferrer"
+                style={{...btnSt('#e8f0fe','#2c5fcc'),fontSize:'12px',padding:'5px 14px',
+                  textDecoration:'none',flexShrink:0}}>
+                追加
+              </a>
+            </div>
+          ))}
+        </div>
+        <div style={{textAlign:'center'}}>
+          <button onClick={onClose}
+            style={{...btnSt('#f4f5f7','#1a1d23','1px solid #d0d3db')}}>閉じる</button>
+        </div>
       </div>
     </div>
   );
@@ -189,13 +312,16 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
   const [subInput, setSubInput]   = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMsg, setAiMsg]         = useState('');
+  const [estH, setEstH]           = useState(Math.floor((task.estimatedMinutes||0)/60));
+  const [estM, setEstM]           = useState((task.estimatedMinutes||0)%60);
 
   const current = tasks.find(t=>t.id===task.id) || task;
   const selPj   = pjJobs.find(j=>j.id===pjJobId);
 
   const save = useCallback(() => {
-    updateTask(task.id, { title, desc, notes, due, priority, status, pjJobId, scheduledDate:schedDate });
-  }, [title,desc,notes,due,priority,status,pjJobId,schedDate]);
+    const estimatedMinutes = parseInt(estH||0)*60 + parseInt(estM||0);
+    updateTask(task.id, { title, desc, notes, due, priority, status, pjJobId, scheduledDate:schedDate, estimatedMinutes });
+  }, [title,desc,notes,due,priority,status,pjJobId,schedDate,estH,estM]);
 
   const handleClose  = () => { save(); onClose(); };
   const handleAddSub = () => { if(!subInput.trim())return; addSubtask(task.id,subInput.trim()); setSubInput(''); };
@@ -257,6 +383,24 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
           <div><label style={labelSt}>期限日</label>
             <input type="date" value={due} onChange={e=>setDue(e.target.value)} style={sel}/></div>
         </div>
+
+        {/* 想定完了時間（In Progress のとき表示） */}
+        {status === 'inprogress' && (
+          <div style={{marginBottom:'14px',background:'#FAEEDA',borderRadius:'8px',padding:'12px 14px',
+            border:'1px solid #f0d49a'}}>
+            <label style={{...labelSt,color:'#854F0B',marginBottom:'10px'}}>⏱ 想定完了時間</label>
+            <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
+              <input type="number" min="0" max="23" value={estH}
+                onChange={e=>setEstH(e.target.value)}
+                style={{...inputSt,width:'70px',textAlign:'center',background:'#ffffff'}} />
+              <span style={{fontSize:'13px',color:'#5f6470',flexShrink:0}}>時間</span>
+              <input type="number" min="0" max="59" step="5" value={estM}
+                onChange={e=>setEstM(e.target.value)}
+                style={{...inputSt,width:'70px',textAlign:'center',background:'#ffffff'}} />
+              <span style={{fontSize:'13px',color:'#5f6470',flexShrink:0}}>分</span>
+            </div>
+          </div>
+        )}
 
         <div style={{marginBottom:'16px'}}>
           <label style={labelSt}>説明</label>
@@ -356,7 +500,7 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
 function AddTaskModal({ onClose, onAdd, initStatus, pjJobs }) {
   const [f, setF] = useState({
     title:'', desc:'', status:initStatus||'todo', priority:'medium',
-    due:'', pjJobId:'', scheduledDate:'', notes:'',
+    due:'', pjJobId:'', scheduledDate:'', notes:'', estimatedMinutes:0,
   });
   const upd   = k => e => setF(x=>({...x,[k]:e.target.value}));
   const sel   = {...inputSt, width:'auto', padding:'6px 10px'};
@@ -870,15 +1014,17 @@ export default function App() {
   const [addStatus, setAddStatus]   = useState('todo');
   const [weekOff, setWeekOff]       = useState(0);
   const [timeData, setTimeData]     = useState(()=>lsGet('tm-time',       {}));
-  const [dragId, setDragId]           = useState(null);
-  const [dragSubInfo, setDragSubInfo] = useState(null);
-  const [dragOver, setDragOver]       = useState(null);
+  const dragIdRef      = useRef(null);
+  const dragSubInfoRef = useRef(null);
+  const [dragOver, setDragOver] = useState(null);
   const [expandedTasks, setExpandedTasks] = useState(new Set());
   const [showPjMgr, setShowPjMgr]   = useState(false);
   const [showWsMgr, setShowWsMgr]   = useState(false);
   const [apiKey, setApiKey]         = useState(()=>localStorage.getItem('tm-apikey')||'');
   const [showApiKey, setShowApiKey] = useState(false);
   const [showDone, setShowDone]     = useState(false);
+  const [pendingIP, setPendingIP]     = useState(null); // {taskId, title}
+  const [scheduleItems, setScheduleItems] = useState(null); // ScheduleModal用
 
   // ── Save to localStorage on change ──
   useEffect(()=>{ lsSet('tm-workspaces', workspaces); },[workspaces]);
@@ -904,9 +1050,11 @@ export default function App() {
     return {...t, subtasks:newSubs, status: allDone?'done':t.status};
   }));
   const removeSubtask      = (taskId,subId) => setTasks(ts=>ts.map(t=>t.id===taskId?{...t,subtasks:t.subtasks.filter(s=>s.id!==subId)}:t));
-  const updateSubtaskStatus = (taskId,subId,newStatus) => setTasks(ts=>ts.map(t=>{
+  const updateSubtaskStatus = (taskId,subId,newStatus,estimatedMinutes) => setTasks(ts=>ts.map(t=>{
     if(t.id!==taskId) return t;
-    const newSubs = t.subtasks.map(s=>s.id===subId?{...s,status:newStatus}:s);
+    const newSubs = t.subtasks.map(s=>s.id===subId
+      ? {...s, status:newStatus, ...(estimatedMinutes!=null?{estimatedMinutes}:{})}
+      : s);
     const allDone = newSubs.length>0 && newSubs.every(s=>s.status==='done'||s.done);
     return {...t, subtasks:newSubs, status: allDone?'done':t.status};
   }));
@@ -919,6 +1067,39 @@ export default function App() {
   const setTime = (key,dk,val) => setTimeData(prev=>({...prev,[key]:{...(prev[key]||{}),[dk]:val}}));
 
   const stats = ALL_COLS.map(c=>({...c, count:wsTasks.filter(t=>t.status===c.key).length}));
+
+  // ── スケジュールモーダルを開く（In Progress タスクを 10:00 始業で一覧表示）──
+  const openScheduleModal = (ipTasks) => {
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
+    let startMins = 10 * 60; // 10:00
+
+    const ipSubtasks = wsTasks.flatMap(t =>
+      t.subtasks
+        .filter(s => s.status === 'inprogress')
+        .map(s => ({title:`${t.title}：${s.text}`, estimatedMinutes: s.estimatedMinutes || 0}))
+    );
+    const allItems = [
+      ...ipTasks.map(t => ({title: t.title, estimatedMinutes: t.estimatedMinutes || 0})),
+      ...ipSubtasks,
+    ];
+    if(allItems.length === 0) return;
+
+    const fmtDT = m =>
+      `${dateStr}T${String(Math.floor(m/60)).padStart(2,'0')}${String(m%60).padStart(2,'0')}00`;
+
+    const items = allItems.map(item => {
+      const duration = item.estimatedMinutes > 0 ? item.estimatedMinutes : 60;
+      const endMins  = startMins + duration;
+      const result   = {
+        title: item.title, startMins, endMins,
+        url: `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(item.title)}&dates=${fmtDT(startMins)}/${fmtDT(endMins)}`,
+      };
+      startMins = endMins;
+      return result;
+    });
+    setScheduleItems(items);
+  };
 
   return (
     <>
@@ -1095,27 +1276,48 @@ export default function App() {
                         .map(t=>({task:t, subs:t.subtasks.filter(s=>s.status==='inprogress')}))
                         .filter(({subs})=>subs.length>0)
                     : [];
+
+                  // In Progress 合計想定時間（メインタスク＋サブタスク）
+                  const totalIPMins = col.key==='inprogress'
+                    ? colTasks.reduce((sum,t)=>sum+(t.estimatedMinutes||0),0)
+                      + wsTasks.flatMap(t=>t.subtasks.filter(s=>s.status==='inprogress'))
+                               .reduce((sum,s)=>sum+(s.estimatedMinutes||0),0)
+                    : 0;
+                  const totalIPH = Math.floor(totalIPMins/60);
+                  const totalIPM = totalIPMins%60;
+
                   return(
                     <div key={col.key}
                       style={{flex:1,minWidth:'250px',borderRadius:'8px',padding:'13px',
                         border:`2px ${dragOver===col.key?'dashed':'solid'} ${dragOver===col.key?col.accent:'transparent'}`,
-                        background:col.light+'99',transition:'border 0.15s'}}
+                        background:col.light+'99',transition:'border 0.15s',
+                        display:'flex',flexDirection:'column'}}
                       onDragOver={e=>{e.preventDefault();setDragOver(col.key);}}
                       onDrop={e=>{
                         e.preventDefault();
-                        if(dragId){
-                          const dragged = tasks.find(t=>t.id===dragId);
+                        const currentDragId  = dragIdRef.current;
+                        const currentDragSub = dragSubInfoRef.current;
+                        if(currentDragId){
+                          const dragged  = tasks.find(t=>t.id===currentDragId);
                           const isParent = dragged?.subtasks?.length>0;
                           if(!(col.key==='inprogress' && isParent)){
-                            updateTask(dragId,{status:col.key});
+                            if(col.key==='inprogress'){
+                              setPendingIP({taskId:currentDragId, title:dragged?.title||''});
+                            } else {
+                              updateTask(currentDragId,{status:col.key});
+                            }
                           }
-                          setDragId(null);
+                          dragIdRef.current = null;
                         }
-                        if(dragSubInfo){
-                          if(col.key==='inprogress'||col.key==='todo'){
-                            updateSubtaskStatus(dragSubInfo.taskId, dragSubInfo.subId, col.key);
+                        if(currentDragSub){
+                          if(col.key==='inprogress'){
+                            const parentTask = tasks.find(t=>t.id===currentDragSub.taskId);
+                            const sub = parentTask?.subtasks.find(s=>s.id===currentDragSub.subId);
+                            setPendingIP({taskId:currentDragSub.taskId, subId:currentDragSub.subId, title:sub?.text||'', isSub:true});
+                          } else if(col.key==='todo'){
+                            updateSubtaskStatus(currentDragSub.taskId, currentDragSub.subId, col.key);
                           }
-                          setDragSubInfo(null);
+                          dragSubInfoRef.current = null;
                         }
                         setDragOver(null);
                       }}
@@ -1127,51 +1329,71 @@ export default function App() {
                       </div>
 
                       {/* タスクカード */}
-                      {colTasks.map(task=>{
-                        const isParent  = task.subtasks.length>0;
-                        const todoSubs  = task.subtasks.filter(s=>(s.status||'todo')==='todo');
-                        const hasChildren = col.key==='todo' && isParent && todoSubs.length>0;
-                        const isExpanded  = expandedTasks.has(task.id);
-                        const canDragToIP = !isParent; // ノーマルタスクのみInProgressへ
-                        return (
-                          <div key={task.id} style={{marginBottom:'8px'}}>
-                            <TaskCard task={task} accent={col.accent} pjJobs={pjJobs}
-                              expanded={hasChildren && isExpanded}
-                              onToggleExpand={hasChildren ? ()=>toggleExpand(task.id) : undefined}
-                              onClick={()=>setSelTask({...task})}
-                              onDragStart={()=>{ if(canDragToIP||col.key!=='todo') setDragId(task.id); }}
-                              onDragEnd={()=>setDragId(null)}/>
-                            {/* To Do展開：テキストのみ表示 */}
-                            {hasChildren && isExpanded && (
-                              <div style={{marginLeft:'14px', paddingLeft:'12px',
-                                borderLeft:`2px solid ${col.accent}50`,
-                                paddingTop:'4px', paddingBottom:'1px'}}>
-                                {todoSubs.map(sub=>(
-                                  <SubtaskTextRow key={sub.id} subtask={sub}
-                                    onDragStart={()=>setDragSubInfo({taskId:task.id, subId:sub.id})}
-                                    onDragEnd={()=>setDragSubInfo(null)}/>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                      <div style={{flex:1}}>
+                        {colTasks.map(task=>{
+                          const isParent  = task.subtasks.length>0;
+                          const todoSubs  = task.subtasks.filter(s=>(s.status||'todo')==='todo');
+                          const hasChildren = col.key==='todo' && isParent && todoSubs.length>0;
+                          const isExpanded  = expandedTasks.has(task.id);
+                          const canDragToIP = !isParent;
+                          return (
+                            <div key={task.id} style={{marginBottom:'8px'}}>
+                              <TaskCard task={task} accent={col.accent} pjJobs={pjJobs}
+                                expanded={hasChildren && isExpanded}
+                                onToggleExpand={hasChildren ? ()=>toggleExpand(task.id) : undefined}
+                                onClick={()=>setSelTask({...task})}
+                                onDragStart={()=>{ if(canDragToIP||col.key!=='todo') dragIdRef.current=task.id; }}
+                                onDragEnd={()=>{ dragIdRef.current=null; }}/>
+                              {/* To Do展開：テキストのみ表示 */}
+                              {hasChildren && isExpanded && (
+                                <div style={{marginLeft:'14px', paddingLeft:'12px',
+                                  borderLeft:`2px solid ${col.accent}50`,
+                                  paddingTop:'4px', paddingBottom:'1px'}}>
+                                  {todoSubs.map(sub=>(
+                                    <SubtaskTextRow key={sub.id} subtask={sub}
+                                      onDragStart={()=>{ dragSubInfoRef.current={taskId:task.id, subId:sub.id}; }}
+                                      onDragEnd={()=>{ dragSubInfoRef.current=null; }}/>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
 
-                      {/* In Progress列：サブタスクカード表示 */}
-                      {ipSubGroups.map(({task,subs})=>(
-                        subs.map(sub=>(
-                          <SubtaskInProgressCard key={sub.id} subtask={sub} parentTask={task}
-                            onDragStart={()=>setDragSubInfo({taskId:task.id, subId:sub.id})}
-                            onDragEnd={()=>setDragSubInfo(null)}
-                            onOpenParent={()=>setSelTask({...task})}/>
-                        ))
-                      ))}
-
-                      <div onClick={()=>{setAddStatus(col.key);setShowAdd(true);}}
-                        style={{padding:'7px',borderRadius:'6px',textAlign:'center',cursor:'pointer',
-                          color:'#9095a0',fontSize:'12px',border:'1px dashed #d0d3db',marginTop:'4px'}}>
-                        + 追加
+                        {/* In Progress列：サブタスクカード表示 */}
+                        {ipSubGroups.map(({task,subs})=>(
+                          subs.map(sub=>(
+                            <SubtaskInProgressCard key={sub.id} subtask={sub} parentTask={task}
+                              onDragStart={()=>{ dragSubInfoRef.current={taskId:task.id, subId:sub.id}; }}
+                              onDragEnd={()=>{ dragSubInfoRef.current=null; }}
+                              onOpenParent={()=>setSelTask({...task})}/>
+                          ))
+                        ))}
                       </div>
+
+                      {/* In Progress フッター：合計想定時間 + Google カレンダー */}
+                      {col.key==='inprogress' && (
+                        <div style={{marginTop:'12px',paddingTop:'12px',
+                          borderTop:'1px solid rgba(186,117,23,0.25)'}}>
+                          <div style={{fontSize:'12px',color:'#854F0B',fontWeight:'500',
+                            marginBottom:'8px',textAlign:'center'}}>
+                            合計想定時間：
+                            {totalIPMins === 0
+                              ? '未設定'
+                              : `${totalIPH>0?`${totalIPH}時間`:''}${totalIPM>0?`${totalIPM}分`:''}`
+                            }
+                          </div>
+                          <button
+                            onClick={()=>openScheduleModal(colTasks)}
+                            disabled={colTasks.length===0}
+                            style={{...btnSt('#fff8ee','#854F0B','1px solid #e0a830'),
+                              width:'100%',fontSize:'12px',
+                              opacity:colTasks.length===0?0.4:1,
+                              cursor:colTasks.length===0?'default':'pointer'}}>
+                            📅 Googleカレンダーに追加
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1202,13 +1424,13 @@ export default function App() {
                           border:`2px ${dragOver===col.key?'dashed':'solid'} ${dragOver===col.key?col.accent:'transparent'}`,
                           background:col.light+'99',transition:'border 0.15s',minWidth:'250px'}}
                           onDragOver={e=>{e.preventDefault();setDragOver(col.key);}}
-                          onDrop={e=>{e.preventDefault();if(dragId)updateTask(dragId,{status:col.key});setDragId(null);setDragOver(null);}}
+                          onDrop={e=>{e.preventDefault();if(dragIdRef.current){updateTask(dragIdRef.current,{status:col.key});dragIdRef.current=null;}setDragOver(null);}}
                           onDragLeave={()=>setDragOver(null)}>
                           {colTasks.map(task=>(
                             <TaskCard key={task.id} task={task} accent={col.accent} pjJobs={pjJobs}
                               onClick={()=>setSelTask({...task})}
-                              onDragStart={()=>setDragId(task.id)}
-                              onDragEnd={()=>setDragId(null)}/>
+                              onDragStart={()=>{ dragIdRef.current=task.id; }}
+                              onDragEnd={()=>{ dragIdRef.current=null; }}/>
                           ))}
                           <div onClick={()=>{setAddStatus(col.key);setShowAdd(true);}}
                             style={{padding:'7px',borderRadius:'6px',textAlign:'center',cursor:'pointer',
@@ -1248,6 +1470,30 @@ export default function App() {
           workspaces={workspaces}
           setWorkspaces={ws=>{ setWorkspaces(ws); if(!ws.find(w=>w.id===activeWsId)) setActiveWsId(ws[0]?.id); }}
           onClose={()=>setShowWsMgr(false)}/>
+      )}
+      {scheduleItems&&(
+        <ScheduleModal items={scheduleItems} onClose={()=>setScheduleItems(null)}/>
+      )}
+      {pendingIP&&(
+        <EstimatedTimeModal
+          taskTitle={pendingIP.title}
+          onConfirm={mins=>{
+            if(pendingIP.isSub){
+              updateSubtaskStatus(pendingIP.taskId, pendingIP.subId, 'inprogress', mins);
+            } else {
+              updateTask(pendingIP.taskId, {status:'inprogress', estimatedMinutes:mins});
+            }
+            setPendingIP(null);
+          }}
+          onSkip={()=>{
+            if(pendingIP.isSub){
+              updateSubtaskStatus(pendingIP.taskId, pendingIP.subId, 'inprogress');
+            } else {
+              updateTask(pendingIP.taskId, {status:'inprogress'});
+            }
+            setPendingIP(null);
+          }}
+        />
       )}
     </>
   );
