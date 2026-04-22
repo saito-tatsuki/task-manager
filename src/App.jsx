@@ -191,58 +191,53 @@ function SubtaskInProgressCard({ subtask, parentTask, onDragStart, onDragEnd, on
 }
 
 // ── ESTIMATED TIME MODAL ─────────────────────────────────────
-function EstimatedTimeModal({ taskTitle, onConfirm, onSkip }) {
-  const [hours, setHours]     = useState(0);
-  const [minutes, setMinutes] = useState(30);
+const EST_OPTIONS = [
+  {label:'30分',      value:30},
+  {label:'1時間',     value:60},
+  {label:'1時間30分', value:90},
+  {label:'2時間',     value:120},
+  {label:'2時間30分', value:150},
+  {label:'3時間',     value:180},
+  {label:'3時間30分', value:210},
+  {label:'4時間',     value:240},
+  {label:'5時間',     value:300},
+  {label:'6時間',     value:360},
+  {label:'7時間',     value:420},
+  {label:'8時間',     value:480},
+];
 
-  const handleConfirm = () => {
-    const total = parseInt(hours || 0) * 60 + parseInt(minutes || 0);
-    onConfirm(total > 0 ? total : 30);
-  };
+function EstimatedTimeModal({ taskTitle, onConfirm, onCancel }) {
+  const [selected, setSelected] = useState(30);
 
   return (
-    <div onClick={onSkip}
+    <div onClick={onCancel}
       style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.45)',zIndex:250,
         display:'flex',alignItems:'center',justifyContent:'center',padding:'16px'}}>
       <div onClick={e=>e.stopPropagation()}
         style={{background:'#ffffff',borderRadius:'12px',border:'1px solid #e8eaed',
-          width:'100%',maxWidth:'380px',padding:'26px',
+          width:'100%',maxWidth:'360px',padding:'26px',
           boxShadow:'0 8px 32px rgba(0,0,0,0.12)'}}>
         <h2 style={{fontSize:'15px',fontWeight:'600',color:'#1a1d23',marginBottom:'6px'}}>
           想定完了時間を設定
         </h2>
-        <div style={{fontSize:'13px',color:'#5f6470',marginBottom:'20px',
+        <div style={{fontSize:'13px',color:'#5f6470',marginBottom:'18px',
           overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
           {taskTitle}
         </div>
 
-        <div style={{display:'flex',gap:'12px',alignItems:'flex-end',marginBottom:'24px'}}>
-          <div style={{flex:1}}>
-            <label style={labelSt}>時間</label>
-            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-              <input type="number" min="0" max="23" value={hours}
-                onChange={e=>setHours(e.target.value)}
-                style={{...inputSt,textAlign:'center'}} />
-              <span style={{color:'#5f6470',fontSize:'13px',flexShrink:0}}>時間</span>
-            </div>
-          </div>
-          <div style={{flex:1}}>
-            <label style={labelSt}>分</label>
-            <div style={{display:'flex',alignItems:'center',gap:'6px'}}>
-              <input type="number" min="0" max="59" step="5" value={minutes}
-                onChange={e=>setMinutes(e.target.value)}
-                style={{...inputSt,textAlign:'center'}} />
-              <span style={{color:'#5f6470',fontSize:'13px',flexShrink:0}}>分</span>
-            </div>
-          </div>
-        </div>
+        <select value={selected} onChange={e=>setSelected(Number(e.target.value))}
+          style={{...inputSt, marginBottom:'24px'}}>
+          {EST_OPTIONS.map(o=>(
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
 
         <div style={{display:'flex',gap:'10px',justifyContent:'flex-end'}}>
-          <button onClick={onSkip}
-            style={{...btnSt('#f4f5f7','#1a1d23','1px solid #d0d3db'),fontSize:'12px'}}>
-            スキップ
+          <button onClick={onCancel}
+            style={{...btnSt('#f4f5f7','#1a1d23','1px solid #d0d3db')}}>
+            キャンセル
           </button>
-          <button onClick={handleConfirm} style={btnSt('#e8f0fe','#2c5fcc')}>
+          <button onClick={()=>onConfirm(selected)} style={btnSt('#e8f0fe','#2c5fcc')}>
             設定して移動
           </button>
         </div>
@@ -312,16 +307,17 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
   const [subInput, setSubInput]   = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiMsg, setAiMsg]         = useState('');
-  const [estH, setEstH]           = useState(Math.floor((task.estimatedMinutes||0)/60));
-  const [estM, setEstM]           = useState((task.estimatedMinutes||0)%60);
+  const initEst = EST_OPTIONS.reduce((prev,cur) =>
+    Math.abs(cur.value-(task.estimatedMinutes||60)) < Math.abs(prev.value-(task.estimatedMinutes||60)) ? cur : prev
+  ).value;
+  const [estMins, setEstMins] = useState(initEst);
 
   const current = tasks.find(t=>t.id===task.id) || task;
   const selPj   = pjJobs.find(j=>j.id===pjJobId);
 
   const save = useCallback(() => {
-    const estimatedMinutes = parseInt(estH||0)*60 + parseInt(estM||0);
-    updateTask(task.id, { title, desc, notes, due, priority, status, pjJobId, scheduledDate:schedDate, estimatedMinutes });
-  }, [title,desc,notes,due,priority,status,pjJobId,schedDate,estH,estM]);
+    updateTask(task.id, { title, desc, notes, due, priority, status, pjJobId, scheduledDate:schedDate, estimatedMinutes:estMins });
+  }, [title,desc,notes,due,priority,status,pjJobId,schedDate,estMins]);
 
   const handleClose  = () => { save(); onClose(); };
   const handleAddSub = () => { if(!subInput.trim())return; addSubtask(task.id,subInput.trim()); setSubInput(''); };
@@ -388,17 +384,13 @@ function TaskModal({ task, tasks, pjJobs, apiKey, updateTask, addSubtask, toggle
         {status === 'inprogress' && (
           <div style={{marginBottom:'14px',background:'#FAEEDA',borderRadius:'8px',padding:'12px 14px',
             border:'1px solid #f0d49a'}}>
-            <label style={{...labelSt,color:'#854F0B',marginBottom:'10px'}}>⏱ 想定完了時間</label>
-            <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
-              <input type="number" min="0" max="23" value={estH}
-                onChange={e=>setEstH(e.target.value)}
-                style={{...inputSt,width:'70px',textAlign:'center',background:'#ffffff'}} />
-              <span style={{fontSize:'13px',color:'#5f6470',flexShrink:0}}>時間</span>
-              <input type="number" min="0" max="59" step="5" value={estM}
-                onChange={e=>setEstM(e.target.value)}
-                style={{...inputSt,width:'70px',textAlign:'center',background:'#ffffff'}} />
-              <span style={{fontSize:'13px',color:'#5f6470',flexShrink:0}}>分</span>
-            </div>
+            <label style={{...labelSt,color:'#854F0B',marginBottom:'8px'}}>⏱ 想定完了時間</label>
+            <select value={estMins} onChange={e=>setEstMins(Number(e.target.value))}
+              style={{...inputSt,background:'#ffffff'}}>
+              {EST_OPTIONS.map(o=>(
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
           </div>
         )}
 
@@ -1014,8 +1006,9 @@ export default function App() {
   const [addStatus, setAddStatus]   = useState('todo');
   const [weekOff, setWeekOff]       = useState(0);
   const [timeData, setTimeData]     = useState(()=>lsGet('tm-time',       {}));
-  const dragIdRef      = useRef(null);
-  const dragSubInfoRef = useRef(null);
+  const dragIdRef         = useRef(null);
+  const dragSubInfoRef    = useRef(null);
+  const dragOverTaskIdRef = useRef(null);
   const [dragOver, setDragOver] = useState(null);
   const [expandedTasks, setExpandedTasks] = useState(new Set());
   const [showPjMgr, setShowPjMgr]   = useState(false);
@@ -1059,6 +1052,15 @@ export default function App() {
     return {...t, subtasks:newSubs, status: allDone?'done':t.status};
   }));
   const deleteTask    = id => setTasks(ts=>ts.filter(t=>t.id!==id));
+  const reorderTask   = (draggedId, targetId) => setTasks(ts=>{
+    const arr = [...ts];
+    const from = arr.findIndex(t=>t.id===draggedId);
+    const to   = arr.findIndex(t=>t.id===targetId);
+    if(from===-1||to===-1||from===to) return ts;
+    const [item] = arr.splice(from,1);
+    arr.splice(to,0,item);
+    return arr;
+  });
   const toggleExpand  = id => setExpandedTasks(prev=>{
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -1302,12 +1304,20 @@ export default function App() {
                           const isParent = dragged?.subtasks?.length>0;
                           if(!(col.key==='inprogress' && isParent)){
                             if(col.key==='inprogress'){
-                              setPendingIP({taskId:currentDragId, title:dragged?.title||''});
+                              if(dragged?.status==='inprogress'){
+                                // 同列内の並び替え → モーダルなし
+                                const targetId = dragOverTaskIdRef.current;
+                                if(targetId && targetId!==currentDragId) reorderTask(currentDragId, targetId);
+                              } else {
+                                // 他列からの移動 → 想定時間モーダル表示
+                                setPendingIP({taskId:currentDragId, title:dragged?.title||''});
+                              }
                             } else {
                               updateTask(currentDragId,{status:col.key});
                             }
                           }
-                          dragIdRef.current = null;
+                          dragIdRef.current      = null;
+                          dragOverTaskIdRef.current = null;
                         }
                         if(currentDragSub){
                           if(col.key==='inprogress'){
@@ -1337,7 +1347,8 @@ export default function App() {
                           const isExpanded  = expandedTasks.has(task.id);
                           const canDragToIP = !isParent;
                           return (
-                            <div key={task.id} style={{marginBottom:'8px'}}>
+                            <div key={task.id} style={{marginBottom:'8px'}}
+                              onDragEnter={()=>{ dragOverTaskIdRef.current=task.id; }}>
                               <TaskCard task={task} accent={col.accent} pjJobs={pjJobs}
                                 expanded={hasChildren && isExpanded}
                                 onToggleExpand={hasChildren ? ()=>toggleExpand(task.id) : undefined}
@@ -1383,15 +1394,21 @@ export default function App() {
                               : `${totalIPH>0?`${totalIPH}時間`:''}${totalIPM>0?`${totalIPM}分`:''}`
                             }
                           </div>
+                          {(() => {
+                            const hasIPSubs = wsTasks.some(t=>t.subtasks.some(s=>s.status==='inprogress'));
+                            const disabled  = colTasks.length===0 && !hasIPSubs;
+                            return (
                           <button
                             onClick={()=>openScheduleModal(colTasks)}
-                            disabled={colTasks.length===0}
+                            disabled={disabled}
                             style={{...btnSt('#fff8ee','#854F0B','1px solid #e0a830'),
                               width:'100%',fontSize:'12px',
-                              opacity:colTasks.length===0?0.4:1,
-                              cursor:colTasks.length===0?'default':'pointer'}}>
+                              opacity:disabled?0.4:1,
+                              cursor:disabled?'default':'pointer'}}>
                             📅 Googleカレンダーに追加
                           </button>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
@@ -1485,14 +1502,7 @@ export default function App() {
             }
             setPendingIP(null);
           }}
-          onSkip={()=>{
-            if(pendingIP.isSub){
-              updateSubtaskStatus(pendingIP.taskId, pendingIP.subId, 'inprogress');
-            } else {
-              updateTask(pendingIP.taskId, {status:'inprogress'});
-            }
-            setPendingIP(null);
-          }}
+          onCancel={()=>setPendingIP(null)}
         />
       )}
     </>
