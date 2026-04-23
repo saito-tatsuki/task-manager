@@ -192,6 +192,65 @@ function SubtaskInProgressCard({ subtask, parentTask, onDragStart, onDragEnd, on
   );
 }
 
+// ── DONE CARD ────────────────────────────────────────────────
+function DoneCard({ item, onUpdateCompletedAt, onCardClick }) {
+  const [editDate, setEditDate] = useState(false);
+  const fmtDate = ts => {
+    if(!ts) return '日付なし';
+    const d = new Date(ts);
+    const today = new Date(); today.setHours(0,0,0,0);
+    const diff = today.getTime() - new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    if(diff === 0) return '今日';
+    if(diff === 86400000) return '昨日';
+    const W = ['日','月','火','水','木','金','土'];
+    return `${d.getMonth()+1}/${d.getDate()}(${W[d.getDay()]})`;
+  };
+  const toDateStr = ts => {
+    if(!ts) return '';
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+  return (
+    <div onClick={onCardClick}
+      style={{background:'#fff',border:'1px solid #d0dcc8',borderRadius:'8px',
+        padding:'10px 13px',minWidth:'160px',maxWidth:'190px',flexShrink:0,cursor:'pointer',
+        boxShadow:'0 1px 4px rgba(59,109,17,0.06)'}}>
+      {item.isSub && (
+        <div style={{fontSize:'10px',color:'#9095a0',marginBottom:'3px',
+          overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+          ↳ {item.parentTitle}
+        </div>
+      )}
+      <div style={{fontSize:'12px',fontWeight:'500',color:'#1a1d23',lineHeight:'1.4',marginBottom:'8px',
+        overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>
+        {item.title}
+      </div>
+      <div style={{display:'flex',alignItems:'center',gap:'4px'}} onClick={e=>e.stopPropagation()}>
+        <span style={{fontSize:'10px',color:'#3B6D11'}}>✓</span>
+        {editDate ? (
+          <input type="date" defaultValue={toDateStr(item.completedAt)} autoFocus
+            onChange={e=>{
+              if(e.target.value){
+                const [y,m,dy] = e.target.value.split('-').map(Number);
+                onUpdateCompletedAt(new Date(y,m-1,dy,12,0,0).getTime());
+              }
+              setEditDate(false);
+            }}
+            onBlur={()=>setEditDate(false)}
+            style={{fontSize:'11px',border:'1px solid #a8c8a0',borderRadius:'4px',
+              padding:'1px 4px',color:'#5f6470',fontFamily:'inherit',outline:'none'}}/>
+        ) : (
+          <span onClick={()=>setEditDate(true)}
+            style={{fontSize:'11px',color:'#5f6470',cursor:'pointer',
+              borderBottom:'1px dashed #c0c4cc',lineHeight:'1.6'}}>
+            {fmtDate(item.completedAt)}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── ESTIMATED TIME MODAL ─────────────────────────────────────
 const EST_OPTIONS = [
   {label:'30分',      value:30},
@@ -1376,6 +1435,16 @@ export default function App() {
     setScheduleItems({items: allItems, startMins});
   };
 
+  const updateCompletedAt = (taskId, subId, newTs) => {
+    if(subId){
+      setTasks(ts=>ts.map(t=>t.id===taskId
+        ? {...t, subtasks:t.subtasks.map(s=>s.id===subId?{...s,completedAt:newTs}:s)}
+        : t));
+    } else {
+      updateTask(taskId, {completedAt: newTs});
+    }
+  };
+
   const applySchedule = (computedItems) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1560,7 +1629,8 @@ export default function App() {
             )}
           </div>
 
-          <div style={{flex:1,overflow:'auto',padding:'18px 22px'}}>
+          <div style={{flex:1,overflow:'hidden',display:'flex',flexDirection:'column'}}>
+            <div style={{flex:1,overflow:'auto',padding:'18px 22px 8px 22px'}}>
             {view==='board'&&(
               <div style={{display:'flex',gap:'12px',height:'100%',alignItems:'flex-start'}}>
                 {COLS.map(col=>{
@@ -1713,52 +1783,93 @@ export default function App() {
                 {/* メモ列 */}
                 <MemoBoardColumn wsId={activeWsId} memos={memos} setMemos={setMemos}/>
 
-                {/* 完了列（折りたたみ） */}
-                {(() => {
-                  const col = DONE_COL;
-                  const colTasks = wsTasks.filter(t=>t.status===col.key);
-                  return (
-                    <div style={{minWidth: showDone ? '250px' : 'auto', flexShrink:0}}>
-                      <button onClick={()=>setShowDone(v=>!v)}
-                        style={{display:'flex',alignItems:'center',gap:'6px',
-                          background: col.light+'99', border:'none',borderRadius:'8px',
-                          padding:'8px 13px',cursor:'pointer',width:'100%',marginBottom: showDone?'8px':'0',
-                          fontFamily:'inherit'}}>
-                        <span style={{background:col.accent,color:'white',borderRadius:'20px',
-                          padding:'1px 9px',fontSize:'11px',fontWeight:'600'}}>{colTasks.length}</span>
-                        <span style={{fontWeight:'600',fontSize:'13px',color:'#1a1d23'}}>{col.label}</span>
-                        <span style={{fontSize:'10px',color:'#9095a0',marginLeft:'auto'}}>
-                          {showDone?'▲':'▼'}
-                        </span>
-                      </button>
-                      {showDone&&(
-                        <div style={{borderRadius:'8px',padding:'13px',
-                          border:`2px ${dragOver===col.key?'dashed':'solid'} ${dragOver===col.key?col.accent:'transparent'}`,
-                          background:col.light+'99',transition:'border 0.15s',minWidth:'250px'}}
-                          onDragOver={e=>{e.preventDefault();setDragOver(col.key);}}
-                          onDrop={e=>{e.preventDefault();if(dragIdRef.current){updateTask(dragIdRef.current,{status:col.key});dragIdRef.current=null;}setDragOver(null);}}
-                          onDragLeave={()=>setDragOver(null)}>
-                          {colTasks.map(task=>(
-                            <TaskCard key={task.id} task={task} accent={col.accent} pjJobs={pjJobs}
-                              onClick={()=>setSelTask({...task})}
-                              onDragStart={()=>{ dragIdRef.current=task.id; }}
-                              onDragEnd={()=>{ dragIdRef.current=null; }}/>
-                          ))}
-                          <div onClick={()=>{setAddStatus(col.key);setShowAdd(true);}}
-                            style={{padding:'7px',borderRadius:'6px',textAlign:'center',cursor:'pointer',
-                              color:'#9095a0',fontSize:'12px',border:'1px dashed #d0d3db',marginTop:'4px'}}>
-                            + 追加
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
               </div>
             )}
             {view==='aplex'&&(
               <AplexView tasks={wsTasks} pjJobs={pjJobs} weekDates={weekDates} timeData={timeData} setTime={setTime}/>
             )}
+            </div>
+            {/* ── 完了セクション（ボード下部） ── */}
+            {view==='board'&&(()=>{
+              const today0 = new Date(); today0.setHours(0,0,0,0);
+              const dateKey = ts => {
+                if(!ts) return 'none';
+                const d = new Date(ts); d.setHours(0,0,0,0);
+                return d.getTime();
+              };
+              const dateLabel = ts => {
+                if(!ts) return '日付なし';
+                const diff = today0.getTime() - dateKey(ts);
+                if(diff === 0) return '今日';
+                if(diff === 86400000) return '昨日';
+                const d = new Date(ts);
+                const W = ['日','月','火','水','木','金','土'];
+                return `${d.getMonth()+1}/${d.getDate()}(${W[d.getDay()]})`;
+              };
+              const doneTasks = wsTasks.filter(t=>t.status==='done').map(t=>({
+                id: String(t.id), taskId: t.id, subId: null, isSub: false,
+                title: t.title, completedAt: t.completedAt,
+              }));
+              const doneSubtasks = wsTasks.flatMap(t=>
+                t.subtasks.filter(s=>s.status==='done').map(s=>({
+                  id: `${t.id}-${s.id}`, taskId: t.id, subId: s.id, isSub: true,
+                  title: s.text, parentTitle: t.title, completedAt: s.completedAt,
+                }))
+              );
+              const allDone = [...doneTasks,...doneSubtasks]
+                .sort((a,b)=>(b.completedAt||0)-(a.completedAt||0));
+              // 日付ごとにグループ化
+              const groups = [];
+              allDone.forEach(item=>{
+                const k = dateKey(item.completedAt);
+                const g = groups.find(g=>g.key===k);
+                if(g) g.items.push(item);
+                else groups.push({key:k, label:dateLabel(item.completedAt), items:[item]});
+              });
+              return (
+                <div style={{borderTop:'2px solid #d0dcc8',background:'#EAF3DE55',flexShrink:0}}>
+                  <button onClick={()=>setShowDone(v=>!v)}
+                    style={{display:'flex',alignItems:'center',gap:'8px',width:'100%',
+                      padding:'8px 22px',background:'none',border:'none',cursor:'pointer',fontFamily:'inherit'}}>
+                    <span style={{background:DONE_COL.accent,color:'white',borderRadius:'20px',
+                      padding:'1px 9px',fontSize:'11px',fontWeight:'600'}}>{allDone.length}</span>
+                    <span style={{fontWeight:'600',fontSize:'13px',color:'#1a1d23'}}>完了</span>
+                    <span style={{fontSize:'10px',color:'#9095a0',marginLeft:'auto',marginRight:'4px'}}>
+                      {showDone?'▲':'▼'}
+                    </span>
+                  </button>
+                  {showDone&&(
+                    <div style={{maxHeight:'260px',overflowY:'auto',padding:'0 22px 14px 22px'}}>
+                      {groups.length===0 && (
+                        <div style={{fontSize:'12px',color:'#9095a0',padding:'4px 0'}}>完了済みのタスクはありません</div>
+                      )}
+                      {groups.map(group=>(
+                        <div key={group.key} style={{marginBottom:'12px'}}>
+                          <div style={{fontSize:'11px',fontWeight:'600',color:'#5f6470',
+                            marginBottom:'8px',paddingBottom:'4px',
+                            borderBottom:'1px solid #d0dcc8',letterSpacing:'0.04em'}}>
+                            {group.label}
+                            <span style={{fontWeight:'400',color:'#9095a0',marginLeft:'6px'}}>
+                              {group.items.length}件
+                            </span>
+                          </div>
+                          <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
+                            {group.items.map(item=>(
+                              <DoneCard key={item.id} item={item}
+                                onUpdateCompletedAt={newTs=>updateCompletedAt(item.taskId,item.subId,newTs)}
+                                onCardClick={()=>{
+                                  const t = wsTasks.find(t=>t.id===item.taskId);
+                                  if(t) setSelTask({...t});
+                                }}/>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
