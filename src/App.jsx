@@ -1830,34 +1830,31 @@ export default function App() {
                 const allDone = newSubs.length>0 && newSubs.every(s=>s.status==='done'||s.done);
                 return {...t, subtasks:newSubs, status:allDone?'done':t.status};
               }));
+              // サブタスク完了後も以降のスケジュールをリスケジュール
+              if(endTs && pendingComplete.scheduleComputed){
+                const { taskId, subId, scheduleComputed } = pendingComplete;
+                const completedIdx = scheduleComputed.findIndex(i=>i.taskId===taskId && i.subId===subId);
+                const subsequent = completedIdx >= 0 ? scheduleComputed.slice(completedIdx + 1) : [];
+                if(subsequent.length > 0){
+                  const today = new Date(); today.setHours(0,0,0,0);
+                  const endMins = Math.round((endTs - today.getTime()) / 60000);
+                  const rescheduled = calcSchedule(subsequent, endMins);
+                  applySchedule(rescheduled);
+                }
+              }
             } else {
               updateTask(pendingComplete.taskId, {status:'done', actualMinutes:mins, completedAt:Date.now()});
 
-              // 以降のスケジュール済みタスクを一括シフト
+              // 以降のスケジュール済みタスクを完了時刻から再スケジュール
               if(endTs && pendingComplete.scheduleComputed){
                 const { taskId, scheduleComputed } = pendingComplete;
                 const completedIdx = scheduleComputed.findIndex(i=>i.taskId===taskId && !i.subId);
                 const subsequent = completedIdx >= 0 ? scheduleComputed.slice(completedIdx + 1) : [];
                 if(subsequent.length > 0){
                   const today = new Date(); today.setHours(0,0,0,0);
-                  const firstTs = today.getTime() + subsequent[0].startMins * 60000;
-                  const delta = endTs - firstTs;
-                  if(delta !== 0){
-                    setTasks(ts=>{
-                      let updated = ts;
-                      subsequent.forEach(item=>{
-                        const newTs = today.getTime() + item.startMins * 60000 + delta;
-                        if(item.subId){
-                          updated = updated.map(t=>t.id===item.taskId
-                            ? {...t, subtasks:t.subtasks.map(s=>s.id===item.subId?{...s,startedAt:newTs,scheduledStart:newTs}:s)}
-                            : t);
-                        } else if(item.taskId){
-                          updated = updated.map(t=>t.id===item.taskId?{...t,startedAt:newTs,scheduledStart:newTs}:t);
-                        }
-                      });
-                      return updated;
-                    });
-                  }
+                  const endMins = Math.round((endTs - today.getTime()) / 60000);
+                  const rescheduled = calcSchedule(subsequent, endMins);
+                  applySchedule(rescheduled);
                 }
               }
             }
